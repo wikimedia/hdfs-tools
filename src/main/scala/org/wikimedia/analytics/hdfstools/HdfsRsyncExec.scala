@@ -176,9 +176,9 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
             val targetFileStatus = target.right.get
                 if (approxDiffTimestamps(src, targetFileStatus)) {
                     if (config.dryRun) {
-                        log.info(s"UPDATE_TIMES [dryrun] - ${src.getPath} --> ${target.right.get}")
+                        log.info(s"UPDATE_TIMES [dryrun] - ${src.getPath} --> ${target.right.get.getPath}")
                     } else {
-                        log.debug(s"UPDATE_TIMES - ${src.getPath} --> ${target.right.get}")
+                        log.debug(s"UPDATE_TIMES - ${src.getPath} --> ${target.right.get.getPath}")
                         config.dstFs.setTimes(targetFileStatus.getPath, src.getModificationTime, -1)
                     }
                 }
@@ -213,9 +213,9 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
             }
             if (targetFileStatus.getPermission != newPerm) {
                 if (config.dryRun) {
-                    log.info(s"UPDATE_PERMS [dryrun] -  ${src.getPath} --> ${target.right.get}")
+                    log.info(s"UPDATE_PERMS [dryrun] -  ${src.getPath} --> ${target.right.get.getPath}")
                 } else {
-                    log.debug(s"UPDATE_PERMS -  ${src.getPath} --> ${target.right.get}")
+                    log.debug(s"UPDATE_PERMS -  ${src.getPath} --> ${target.right.get.getPath}")
                     config.dstFs.setPermission(targetFileStatus.getPath, newPerm)
                 }
             }
@@ -306,13 +306,13 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
      * and building a Map[filename, FileStatus] from it.
      *
      * @param srcPath the src path to scan
-     * @param isTransferTreeRoot whether to use a glob if true or a folder scan if false
+     * @param isBasePath whether to use a glob if true or a folder scan if false
      * @return the Map[filename, FileStatus] of the folder/glob content
      */
-    private def getSrcFilesAndFolders(srcPath: Path, isTransferTreeRoot: Boolean): Map[String, FileStatus] = {
+    private def getSrcFilesAndFolders(srcPath: Path, isBasePath: Boolean): Map[String, FileStatus] = {
         // Use globStatus only for recursive tree root, as later we'll always have folders.
         // This prevent having to use the /* addition to Path for glob to return content folders.
-        if (isTransferTreeRoot) {
+        if (isBasePath) {
             val globSrc = config.srcFs.globStatus(srcPath)
             val globSrcChecked = if (globSrc != null) globSrc.toSeq else Seq.empty
             globSrcChecked.map(f => (f.getPath.getName, f)).toMap
@@ -343,8 +343,8 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
     /**
      * Function deleting files and folders in dst that are not present in src, if config says so
      *
-     * Note: No need to pass transferTreeRoot (needed for filter-rules), it never changes
-     *       for dst, it always is config.dst.
+     * Note: No need to pass dstBasePath (needed for filter-rules), it never changes for dst,
+     *       it always is config.dst.
      *
      * @param srcFilesAndFolders the list of files and folders in the worked src folder,
      *                           as a Map[filename, FileStatus]
@@ -364,7 +364,7 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
                     val matchingRule = config.parsedFilterRules.find(rule => rule.matches(dst, config.dstPath))
 
                     if (matchingRule.isDefined && matchingRule.get.ruleType == Exclude() && !config.deleteExcluded) {
-                        log.debug(s"EXCLUDE_DST - $dst")
+                        log.debug(s"EXCLUDE_DST - ${dst.getPath}")
                     } else {
                         if (config.dryRun)
                             log.info(s"DELETE_DST [dryrun] - $dst")
@@ -387,16 +387,16 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
      *
      * @param srcPath the src path to rsync
      * @param dstPath the dst path to rsync to
-     * @param srcTransferTreeRoot the src root of the transfer. None if at root.
+     * @param srcBasePath the src base path, root of the transfer. None if at transfer-root.
      */
     private def applyRecursive(
         srcPath: Path,
         dstPath: Option[Path],
-        srcTransferTreeRoot: Option[Path] = None
+        srcBasePath: Option[Path] = None
     ): Unit = {
-        val isTransferTreeRoot = srcTransferTreeRoot.isEmpty
+        val isBasePath = srcBasePath.isEmpty
 
-        val srcFilesAndFolders = getSrcFilesAndFolders(srcPath, isTransferTreeRoot)
+        val srcFilesAndFolders = getSrcFilesAndFolders(srcPath, isBasePath)
         val dstFilesAndFolders = getDstFilesAndFolders(dstPath)
 
         // First clean the dst directory from files not in src (if delete flag)
@@ -406,18 +406,18 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
         srcFilesAndFolders.keySet.foreach(srcName => {
             val src = srcFilesAndFolders(srcName)
             val foundTarget = dstFilesAndFolders.get(srcName)
-            // We define transferTreeRoot for each file as it can change
+            // We define basePath for each file in root folder as it can change
             // in case of src glob, for instance /my/folder/{src1|src2}
-            val transferTreeRoot = src.getPath.getParent
+            val basePath = if (isBasePath) src.getPath.getParent else srcBasePath.get
 
             // Apply filter-rules
-            val matchingRule = config.parsedFilterRules.find(rule => rule.matches(src, transferTreeRoot))
+            val matchingRule = config.parsedFilterRules.find(rule => rule.matches(src, basePath))
             if (matchingRule.isDefined && matchingRule.get.ruleType == Exclude()) {
-                log.debug(s"EXCLUDE_SRC - $src")
+                log.debug(s"EXCLUDE_SRC - ${src.getPath}")
             } else {
                 if (config.recurse && src.isDirectory) {
                     val target = processSrcAndDst(src, dstPath, foundTarget, copy = false)
-                    applyRecursive(src.getPath, target, Some(transferTreeRoot))
+                    applyRecursive(src.getPath, target, Some(basePath))
                 } else {
                     processSrcAndDst(src, dstPath, foundTarget, copy = true)
                 }

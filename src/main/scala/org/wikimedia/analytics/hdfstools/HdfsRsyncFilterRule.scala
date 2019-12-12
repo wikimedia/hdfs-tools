@@ -54,17 +54,17 @@ class HdfsRsyncFilterRule(
      *       java.nio.file.path.
      *
      * @param fileStatus the filestatus to check
-     * @param transferRoot the root-of-the-transfer folder for the given file
+     * @param basePath the base path. root-of-the-transfer folder for the given file
      * @return true if the rule matches, false otherwise.
      */
-    def matches(fileStatus: FileStatus, transferRoot: Path): Boolean = {
+    def matches(fileStatus: FileStatus, basePath: Path): Boolean = {
         // Get path without scheme
         val fullPath = fileStatus.getPath.toUri.getPath
         val pathToCheck = {
             if (fullPathCheck) {
                 if (!forceFullPathCheck && anchoredToRoot) {
-                    // Trim full path to use only the path portion that is after transferRoot
-                    fullPath.replaceAll(s"^${transferRoot.toUri.getPath}", "")
+                    // Trim full path to use only the path portion that is after basePath
+                    fullPath.replaceAll(s"^${basePath.toUri.getPath}", "")
                 } else {
                     fullPath
                 }
