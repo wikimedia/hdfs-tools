@@ -6,9 +6,12 @@ import java.net.URI
 import org.apache.commons.io.FileUtils
 import org.apache.log4j.AppenderSkeleton
 import org.apache.log4j.spi.LoggingEvent
+import org.scalatest.BeforeAndAfterEach
+import org.scalatest.flatspec.AnyFlatSpec
+import org.scalatest.matchers.should.Matchers
 
 
-trait TestHdfsRsyncHelper {
+trait TestHdfsRsyncHelper extends AnyFlatSpec with Matchers with BeforeAndAfterEach {
 
     /**
      * Custom log appender allowing tests to get access to messages logged during execution
@@ -76,14 +79,14 @@ trait TestHdfsRsyncHelper {
     }
 
 
-    def helperBefore(): Unit = {
+    override def beforeEach(): Unit = {
         // In case there are leftovers
         deleteTestFiles()
         testLogAppender.reset()
 
         createTestFiles()
     }
-     def helperAfter(): Unit = {
+     override def afterEach(): Unit = {
          deleteTestFiles()
          testLogAppender.reset()
      }

@@ -2,16 +2,8 @@ package org.wikimedia.analytics.hdfstools
 
 import java.net.URI
 
-import org.scalatest.BeforeAndAfterEach
-import org.scalatest.flatspec.AnyFlatSpec
-import org.scalatest.matchers.should.Matchers
 
-
-class TestHdfsRsyncConfig extends AnyFlatSpec with Matchers with BeforeAndAfterEach with TestHdfsRsyncHelper {
-
-    override def beforeEach(): Unit = helperBefore()
-
-    override def afterEach(): Unit = helperAfter()
+class TestHdfsRsyncConfig extends TestHdfsRsyncHelper {
 
     "HdfsRsyncConfig" should "validate src URI" in {
         // Invalid cases

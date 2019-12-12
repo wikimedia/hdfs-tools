@@ -22,8 +22,6 @@ import org.apache.hadoop.fs.permission.ChmodParser
 import org.apache.hadoop.fs.{FileSystem, Path}
 import org.apache.log4j.{Appender, Level}
 
-import scala.util.matching.Regex
-
 
 /**
  * Configuration class for Hdfs Rsync
@@ -309,9 +307,10 @@ case class HdfsRsyncConfig(
     }
 
     /**
-     *
-     * @param filterRule
-     * @return
+     * Parse a filter rule into an HdfsRsyncFilterRule, the scala object allowing to
+     * apply the rule on paths.
+     * @param filterRule the filter rule to parse
+     * @return the created HdfsRsyncFilterRule
      */
     def getParsedFilterRule(filterRule: String): HdfsRsyncFilterRule = {
         filterRule match {
@@ -355,7 +354,7 @@ case class HdfsRsyncConfig(
             chmodFiles = getChmodParser(chmodCommands, files = true),
             chmodDirs = getChmodParser(chmodCommands, files = false),
 
-            parsedFilterRules =
+            parsedFilterRules = filterRules.map(getParsedFilterRule)
         )
     }
 }
