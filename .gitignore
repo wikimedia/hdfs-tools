@@ -1,2 +1,11 @@
-*.class
-*.log
+# IntelliJ
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+
+# Maven
+target
+release.properties
+*.releaseBackup
