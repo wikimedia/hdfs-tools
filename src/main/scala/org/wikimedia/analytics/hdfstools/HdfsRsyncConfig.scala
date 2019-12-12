@@ -16,6 +16,7 @@ package org.wikimedia.analytics.hdfstools
 
 import java.io.IOException
 import java.net.URI
+import java.nio.file.FileSystems
 
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.permission.ChmodParser
@@ -283,25 +284,22 @@ case class HdfsRsyncConfig(
 
     /**
      * Create an optional HDFS [[ChmodParser]] from a rebuilt chmod string (comma-separated
-     * chmod commands) for either files or dirs. The rebuilt command string is extracted from
-     * the fully validated list of chmod commands as follow: the full command list is fold,
+     * chmod commands). The rebuilt command string is computed from the fully validated
+     * list of chmod commands as follow: the full command list is fold,
      * concatenating in an option the files or directory commands with the 'F' or 'D' prefix
      * removed if any.
      * The ChmodParser is then created if the fold has generated some command.
      *
-     * @param chmods the validated sequence of commands containing both files and dirs commands
-     * @param files whether the generated command string should be for files or for dirs
+     * @param chmods the validated sequence of commands containing either files and dirs commands
      * @return the generated comma-separated chmod command for either files or dirs, if any
      */
-    private def getChmodParser(chmods: Seq[String], files: Boolean): Option[ChmodParser] = {
-        val (inversePrefix, prefixToRemove) = if (files) ("D", 'F') else ("F", 'D')
+    private def getChmodParser(chmods: Seq[String]): Option[ChmodParser] = {
         val rebuiltString = chmods.foldLeft(None.asInstanceOf[Option[String]])((acc, mod) => {
-            // It's important to use a negative match of inversePrefix here as we want to keep both
-            // prefixed commands and not-prefixed commands applying to both.
-            if (! mod.startsWith(inversePrefix))
-                if (acc.isEmpty) Some(mod.dropWhile(c => c == prefixToRemove))
-                else Some(s"${acc.get},$mod")
-            else acc
+            if (acc.isEmpty) {
+                Some(mod.dropWhile(c => c == 'F' || c== 'D'))
+            } else {
+                Some(s"${acc.get},$mod")
+            }
         })
         rebuiltString.map(new ChmodParser(_))
     }
@@ -309,21 +307,35 @@ case class HdfsRsyncConfig(
     /**
      * Parse a filter rule into an HdfsRsyncFilterRule, the scala object allowing to
      * apply the rule on paths.
+     *
+     * Note: We use a hack to facilitate matching glob patterns: we use a PathMatcher
+     *       from the default filesystem. Match-check will be then done using a fake
+     *       java.nio.file.path.
+     *
      * @param filterRule the filter rule to parse
      * @return the created HdfsRsyncFilterRule
      */
     def getParsedFilterRule(filterRule: String): HdfsRsyncFilterRule = {
         filterRule match {
             case filterRulePattern(rawType, rawModifiers, rawPattern) =>
-                val pattern =  java.nio.file.FileSystems.getDefault.getPathMatcher(rawPattern)
+                val anchoredToRoot = rawPattern.startsWith("/")
+                val updatedPattern = {
+                    // Adding wildcard before pattern to match relative path over full-path
+                    if (!anchoredToRoot) {
+                        s"glob:**$rawPattern"
+                    } else {
+                        s"glob:$rawPattern"
+                    }
+                }
+                val pattern = FileSystems.getDefault.getPathMatcher(updatedPattern)
+
                 new HdfsRsyncFilterRule(
                     ruleType = if (rawType == "+") Include() else Exclude(),
                     pattern = pattern,
                     oppositeMatch = rawModifiers.contains('!'),
-                    fullPathCheck = rawModifiers.contains('/') ||
-                        rawPattern.dropRight(1).contains('/') ||
-                        rawPattern.contains("**"),
-                    anchoredToRoot = rawPattern.startsWith("/"),
+                    fullPathCheck = rawPattern.dropRight(1).contains('/') || rawPattern.contains("**"),
+                    forceFullPathCheck = rawModifiers.contains('/'),
+                    anchoredToRoot = anchoredToRoot,
                     directoryOnly = rawPattern.endsWith("/")
                 )
         }
@@ -351,8 +363,10 @@ case class HdfsRsyncConfig(
             }).orNull,
             dstPath = dst.map(d => new Path(d)).orNull,
 
-            chmodFiles = getChmodParser(chmodCommands, files = true),
-            chmodDirs = getChmodParser(chmodCommands, files = false),
+            // It's important to use a negative match of inversePrefix here as we want to keep both
+            // prefixed commands and not-prefixed commands applying to both.
+            chmodFiles = getChmodParser(chmodCommands.filter(!_.startsWith("D"))),
+            chmodDirs = getChmodParser(chmodCommands.filter(!_.startsWith("F"))),
 
             parsedFilterRules = filterRules.map(getParsedFilterRule)
         )

@@ -33,10 +33,17 @@ object HdfsRsyncCLI {
               |fully qualified absolute URIs, for instance file:/home or hdfs:///user/hive.
               |
               |src should be a glob leading to some existing files and dst should be an existing folder.
-              |Note: a trailing slash in src (as in /example/src/) is changed to a pattern matching only the
-              |      directory content (as in /example/src/*) mimicing linux rsync behavior.
               |
-              |Syntax for filter/include/exclude rules is similar to the linux rsync one:
+              |Note: a trailing slash in src (as in /example/src/) is changed to a pattern matching only the
+              |      directory content (as in /example/src/*) mimicing standard rsync behavior.
+              |
+              |Note: The behavior of HdfsRsync differs from the standard rsync one when src is a folder and the
+              |      algorithm runs without recursion: original rsync skips the folders, while we copy the folder
+              |      and its content at once if it is not present, or overwrite the full folder at once if modifi-
+              |      cation timestamp differs (this is equivalent to do rm -r dir && cp -R).
+              |      This feature can be useful to overwrite full folders when they have been modifed.
+              |
+              |Syntax for filter/include/exclude rules is similar to the standard rsync one:
               | * One rule per command-line option.
               | * Order matters as inclusion/exclusion is done picking the first matching pattern.
               | * Include/exclude options expect patterns only (use filter if you need modifiers)

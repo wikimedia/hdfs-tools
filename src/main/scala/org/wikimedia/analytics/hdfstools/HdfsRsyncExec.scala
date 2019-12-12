@@ -25,11 +25,11 @@ import org.apache.log4j.{ConsoleAppender, Logger, PatternLayout}
  * As a convention, we use dst to name the parent folder of a copy,
  * and target the exact target of a copy in dst (with same filename part)
  *
- * Note: The behavior of HdfsRsync differs from the original rsync one when src is a folder and
- * the algorithm runs without recursion: original rsync skips the folders, while we copy the folder
- * and its content at once if it is not present, or overwrite the full folder at once if modification
- * timestamp differs (this is equivalent to treat folders as files, with cp -r). This feature can be
- * useful to overwrite full folders when they have been modifed.
+ * Note: The behavior of HdfsRsync differs from the original rsync one when src is a folder and the
+ *       algorithm runs without recursion: original rsync skips the folders, while we copy the folder
+ *       and its content at once if it is not present, or overwrite the full folder at once if modifi-
+ *       cation timestamp differs (this is equivalent to do rm -r dir && cp -R).
+ *       This feature can be useful to overwrite full folders when they have been modifed.
  */
 class HdfsRsyncExec(config: HdfsRsyncConfig) {
 

@@ -24,33 +24,59 @@ sealed trait RuleType
 case class Include() extends RuleType
 case class Exclude() extends RuleType
 
+/**
+ * Class defining a FilterRule so that it can be applied to match a FileStatus
+ * for a given transferRoot.
+ *
+ * @param ruleType either Include() or Exclude()
+ * @param pattern the glob pattern to match
+ * @param oppositeMatch to return true if the pattern doesn't match and vice versa
+ * @param fullPathCheck to match the pattern against the full path instead of filename
+ * @param anchoredToRoot to match the pattern from the 'root-of-the-transfer' (the folder
+ *                       containing the file at recursion step 0)
+ * @param directoryOnly to match directories only
+ */
 class HdfsRsyncFilterRule(
     ruleType: RuleType,
     pattern: PathMatcher,
     oppositeMatch: Boolean,
     fullPathCheck: Boolean,
+    forceFullPathCheck: Boolean,
     anchoredToRoot: Boolean,
     directoryOnly: Boolean
 ) {
+
+    /**
+     * Function matching the rule against a fileStatus for a given transferRoot.
+     *
+     * Note: We use a hack to facilitate matching the glob pattern: we use a PathMatcher
+     *       from the default filesystem. Match-check will be then done using a fake
+     *       java.nio.file.path.
+     *
+     * @param fileStatus the filestatus to check
+     * @param transferRoot the root-of-the-transfer folder for the given file
+     * @return true if the rule matches, false otherwise.
+     */
     def matches(fileStatus: FileStatus, transferRoot: Path): Boolean = {
         // Get path without scheme
         val fullPath = fileStatus.getPath.toUri.getPath
-        val refPath = {
+        val pathToCheck = {
             if (fullPathCheck) {
-                if (anchoredToRoot) {
-                    // Similarly, remove scheme from transferRoot to trim
+                if (!forceFullPathCheck && anchoredToRoot) {
+                    // Trim full path to use only the path portion that is after transferRoot
                     fullPath.replaceAll(s"^${transferRoot.toUri.getPath}", "")
                 } else {
                     fullPath
                 }
             } else {
+                // If not fullPathCheck, only use filename
                 fileStatus.getPath.getName
             }
         }
 
         // Using XOR operator to inverse result if oppositeModifier is true
         oppositeMatch ^ (
-            pattern.matches(FileSystems.getDefault.getPath(refPath)) &&
+            pattern.matches(FileSystems.getDefault.getPath(pathToCheck)) &&
                 ((directoryOnly && fileStatus.isDirectory) || !directoryOnly)
             )
     }
