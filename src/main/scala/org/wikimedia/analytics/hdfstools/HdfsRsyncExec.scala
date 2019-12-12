@@ -306,13 +306,13 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
      * and building a Map[filename, FileStatus] from it.
      *
      * @param srcPath the src path to scan
-     * @param recursionTreeRoot whether to use a glob if true or a folder scan if false
+     * @param isTransferTreeRoot whether to use a glob if true or a folder scan if false
      * @return the Map[filename, FileStatus] of the folder/glob content
      */
-    private def getSrcFilesAndFolders(srcPath: Path, recursionTreeRoot: Boolean): Map[String, FileStatus] = {
+    private def getSrcFilesAndFolders(srcPath: Path, isTransferTreeRoot: Boolean): Map[String, FileStatus] = {
         // Use globStatus only for recursive tree root, as later we'll always have folders.
         // This prevent having to use the /* addition to Path for glob to return content folders.
-        if (recursionTreeRoot) {
+        if (isTransferTreeRoot) {
             val globSrc = config.srcFs.globStatus(srcPath)
             val globSrcChecked = if (globSrc != null) globSrc.toSeq else Seq.empty
             globSrcChecked.map(f => (f.getPath.getName, f)).toMap
@@ -343,6 +343,9 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
     /**
      * Function deleting files and folders in dst that are not present in src, if config says so
      *
+     * Note: No need to pass transferTreeRoot (needed for filter-rules), it never changes
+     *       for dst, it always is config.dst.
+     *
      * @param srcFilesAndFolders the list of files and folders in the worked src folder,
      *                           as a Map[filename, FileStatus]
      * @param dstFilesAndFolders the list of files and folders in the worked dst folder,
@@ -355,12 +358,20 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
         if (config.deleteExtraneous) {
             dstFilesAndFolders.keySet.foreach(dstName => {
                 if (! srcFilesAndFolders.contains(dstName)) {
-                    val dst = dstFilesAndFolders(dstName).getPath
-                    if (config.dryRun)
-                        log.info(s"DELETE_DST [dryrun] - $dst")
-                    else {
-                        log.debug(s"DELETE_DST - $dst")
-                        config.dstFs.delete(dst, true) // delete folders recursively
+                    // Apply filter-rules
+                    // We use config.dstPath as the root-of-transfer for dst as it never changes (not true for src)
+                    val dst = dstFilesAndFolders(dstName)
+                    val matchingRule = config.parsedFilterRules.find(rule => rule.matches(dst, config.dstPath))
+
+                    if (matchingRule.isDefined && matchingRule.get.ruleType == Exclude() && !config.deleteExcluded) {
+                        log.debug(s"EXCLUDE_DST - $dst")
+                    } else {
+                        if (config.dryRun)
+                            log.info(s"DELETE_DST [dryrun] - $dst")
+                        else {
+                            log.debug(s"DELETE_DST - $dst")
+                            config.dstFs.delete(dst.getPath, true) // delete folders recursively
+                        }
                     }
                 }
             })
@@ -376,26 +387,40 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
      *
      * @param srcPath the src path to rsync
      * @param dstPath the dst path to rsync to
-     * @param recursiveTreeRoot whether the call is made at the recursive tree root or not (usefull
-     *                          to get src files from glob)
+     * @param srcTransferTreeRoot the src root of the transfer. None if at root.
      */
-    private def applyRecursive(srcPath: Path, dstPath: Option[Path], recursiveTreeRoot: Boolean = false): Unit = {
-        val srcContent = getSrcFilesAndFolders(srcPath, recursiveTreeRoot)
-        val dstContent = getDstFilesAndFolders(dstPath)
+    private def applyRecursive(
+        srcPath: Path,
+        dstPath: Option[Path],
+        srcTransferTreeRoot: Option[Path] = None
+    ): Unit = {
+        val isTransferTreeRoot = srcTransferTreeRoot.isEmpty
+
+        val srcFilesAndFolders = getSrcFilesAndFolders(srcPath, isTransferTreeRoot)
+        val dstFilesAndFolders = getDstFilesAndFolders(dstPath)
 
         // First clean the dst directory from files not in src (if delete flag)
-        deleteExtraneousDstAsNeeded(srcContent, dstContent)
+        deleteExtraneousDstAsNeeded(srcFilesAndFolders, dstFilesAndFolders)
 
         // Then copy/update from src to dst
-        srcContent.keySet.foreach(srcName => {
-            val src = srcContent(srcName)
-            val foundTarget = dstContent.get(srcName)
+        srcFilesAndFolders.keySet.foreach(srcName => {
+            val src = srcFilesAndFolders(srcName)
+            val foundTarget = dstFilesAndFolders.get(srcName)
+            // We define transferTreeRoot for each file as it can change
+            // in case of src glob, for instance /my/folder/{src1|src2}
+            val transferTreeRoot = src.getPath.getParent
 
-            if (config.recurse && src.isDirectory) {
-                val target = processSrcAndDst(src, dstPath, foundTarget, copy = false)
-                applyRecursive(src.getPath, target)
+            // Apply filter-rules
+            val matchingRule = config.parsedFilterRules.find(rule => rule.matches(src, transferTreeRoot))
+            if (matchingRule.isDefined && matchingRule.get.ruleType == Exclude()) {
+                log.debug(s"EXCLUDE_SRC - $src")
             } else {
-                processSrcAndDst(src, dstPath, foundTarget, copy = true)
+                if (config.recurse && src.isDirectory) {
+                    val target = processSrcAndDst(src, dstPath, foundTarget, copy = false)
+                    applyRecursive(src.getPath, target, Some(transferTreeRoot))
+                } else {
+                    processSrcAndDst(src, dstPath, foundTarget, copy = true)
+                }
             }
         })
     }
@@ -405,7 +430,7 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
      * Applies the recursive function on src and dst as defined in config
      */
     def apply(): Unit = {
-        applyRecursive(config.srcPath, config.dst.map(_ => config.dstPath), recursiveTreeRoot = true)
+        applyRecursive(config.srcPath, config.dst.map(_ => config.dstPath))
     }
 
 }

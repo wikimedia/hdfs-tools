@@ -156,8 +156,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
         innerList3 should contain("file_2")
 
         val messages = testLogAppender.logEvents.map(_.getMessage.toString)
-        val skippingMessages = messages.filter(_.startsWith("SKIP_"))
-        skippingMessages.size should equal(3)
+        messages.count(_.startsWith("SKIP_")) should equal(3)
     }
 
     it should "copy src to dst updating modification timestamp" in {
@@ -332,6 +331,70 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
         val resPathFF2 = Paths.get(tmpDstFile1)
         val resPermsFF2 = Files.readAttributes(resPathFF2, classOf[PosixFileAttributes]).permissions()
         PosixFilePermissions.toString(resPermsFF2) should equal("rw-r-----")
+    }
+
+    it should "copy src to dst recursively and not delete extraneous dst file excluded" in {
+        // Create extraneous file in dst
+        val testFolder = new File(new URI(s"$tmpDstBase/folder_to_delete"))
+        testFolder.mkdirs()
+        testFolder.exists() should equal(true)
+        val testFile = new File(new URI(s"$tmpDstBase/folder_to_delete/file_to_delete"))
+        testFile.createNewFile()
+        testFile.exists() should equal(true)
+
+        val config = baseConfig.copy(
+            src = tmpSrc,
+            dst = Some(tmpDstBase),
+            recurse = true,
+            deleteExtraneous = true,
+            filterRules = Seq("- folder_to_delete"),
+            logLevel = Level.DEBUG
+        ).initialize
+        new HdfsRsyncExec(config).apply()
+
+        // Verify extraneous files are gone
+        testFolder.exists() should equal(true)
+        testFile.exists() should equal(true)
+
+        val messages = testLogAppender.logEvents.map(_.getMessage.toString)
+        messages.count(_.startsWith("EXCLUDE_")) should equal(1)
+    }
+
+    it should "copy src to dst recursively except excluded" in {
+        val config = baseConfig.copy(
+            src = tmpSrc,
+            dst = Some(tmpDstBase),
+            recurse = true,
+            sizeOnly = true,
+            filterRules = Seq("- file*"),
+            logLevel = Level.DEBUG // Skipping messages are logged in debug mode
+        ).initialize
+        new HdfsRsyncExec(config).apply()
+
+        val innerList1 = new File(tmpDst).list()
+        innerList1.size should equal(1)
+        innerList1 should contain("folder_1")
+
+        val innerList2 = new File(tmpDstFolder1).list()
+        innerList2.size should equal(0)
+
+        val messages1 = testLogAppender.logEvents.map(_.getMessage.toString)
+        messages1.count(_.startsWith("EXCLUDE_")) should equal(2)
+
+        val config2 = config.copy(filterRules = Seq("- file_1")).initialize
+        testLogAppender.reset()
+        new HdfsRsyncExec(config2).apply()
+
+        val innerList3 = new File(tmpDst).list()
+        innerList3.size should equal(1)
+        innerList3 should contain("folder_1")
+
+        val innerList4 = new File(tmpDstFolder1).list()
+        innerList4.size should equal(1)
+        innerList4 should contain("file_2")
+
+        val messages = testLogAppender.logEvents.map(_.getMessage.toString)
+        messages.count(_.startsWith("EXCLUDE_")) should equal(1)
     }
 }
 

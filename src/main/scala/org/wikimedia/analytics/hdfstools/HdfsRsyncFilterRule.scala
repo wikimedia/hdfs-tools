@@ -15,7 +15,7 @@
 package org.wikimedia.analytics.hdfstools
 
 
-import java.nio.file.{FileSystems, FileSystem, PathMatcher}
+import java.nio.file.{FileSystems, PathMatcher}
 
 import org.apache.hadoop.fs.{FileStatus, Path}
 
@@ -37,7 +37,7 @@ case class Exclude() extends RuleType
  * @param directoryOnly to match directories only
  */
 class HdfsRsyncFilterRule(
-    ruleType: RuleType,
+    val ruleType: RuleType,
     pattern: PathMatcher,
     oppositeMatch: Boolean,
     fullPathCheck: Boolean,

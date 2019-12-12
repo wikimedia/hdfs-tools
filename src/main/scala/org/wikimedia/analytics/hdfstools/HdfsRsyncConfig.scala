@@ -295,10 +295,12 @@ case class HdfsRsyncConfig(
      */
     private def getChmodParser(chmods: Seq[String]): Option[ChmodParser] = {
         val rebuiltString = chmods.foldLeft(None.asInstanceOf[Option[String]])((acc, mod) => {
+            // Removing rsync specific F and D to build a standard chmod command
+            val updatedMod = if (mod.head == 'F' || mod.head == 'D') mod.tail else mod
             if (acc.isEmpty) {
-                Some(mod.dropWhile(c => c == 'F' || c== 'D'))
+                Some(updatedMod)
             } else {
-                Some(s"${acc.get},$mod")
+                Some(s"${acc.get},$updatedMod")
             }
         })
         rebuiltString.map(new ChmodParser(_))
