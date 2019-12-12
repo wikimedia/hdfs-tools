@@ -42,20 +42,23 @@ object HdfsRsyncCLI {
               | * Include/exclude options expect patterns only (use filter if you need modifiers)
               | * Extraneous files to be deleted on dst follow include/exclude rules. Use --delete-excluded
               |   to NOT use the rules on those files.
-              | * the filter rule format is: RULE[MODIFIER] PATTERN
+              | * the filter rule format is: RULE[MODIFIERS] PATTERN
               |     - RULE is either '+' (include) or '-' (exclude).
-              |     - MODIFIER is optional and can be '!' (negative pattern match) or '/' (match pattern
-              |       against full path even if no '/' or '').
+              |     - MODIFIERS are optional and can be '!' (negative pattern match) or '/' (match pattern
+              |       against full path even if no '/' or ''), or both.
               |     - PATTERN is the pattern to match.
-              |   Note: A single space is expected between the rule (or modifier) and the pattern
+              |   Note: A single space is expected between the rule and modifier char sequence and the pattern.
+              |
+              | About patterns:
+              | * Pattern wildcard characters are: '*', '**', '?', (see rsync doc). You can escape wildcards
+              |   using '\'. We don't reproduce the character-class wildcards as their definition is not
+              |   present in documentation.
               | * Patterns starting with a '/' are anchored, meaning they match only from the root of the
               |   transfer  (similar to '^' in regex).
               | * Patterns with a trailing '/' match only directories.
               | * Patterns containing '/' (not counting trailing '/') or '**' are matched against the full
               |   path (including leading directories). Otherwise it is matched only against the final
               |   component of the filename.
-              | * Pattern wildcard characters are: '*', '**', '?', '[...]' (see rsync doc).
-              |   You can escape wildcards using '\'.
             """.stripMargin
         )
 
@@ -114,34 +117,34 @@ object HdfsRsyncCLI {
 
         opt[Unit]("delete-excluded")
             .optional()
-            .action((_, c) => c.copy(deleteExtraneous = true))
+            .action((_, c) => c.copy(deleteExcluded = true))
             .text("Delete extraneous files from dst dirs even if present in exclude rule (default: false)")
 
         opt[Seq[String]]("chmod")
             .optional()
             .unbounded()
             .action((x, c) => {
-                c.copy(chmod = c.chmod ++ x.map(_.trim))
+                c.copy(chmodCommands = c.chmodCommands ++ x.map(_.trim))
             })
             .text("affect file and/or directory permissions")
-
-        opt[String]("exclude")
-            .optional()
-            .unbounded()
-            .action((x, c) => c.copy(filterRules = c.filterRules :+ s"- ${x.trim}"))
-            .text("Add exclusion pattern")
-
-        opt[String]("include")
-            .optional()
-            .unbounded()
-            .action((x, c) => c.copy(filterRules = c.filterRules :+ s"+ ${x.trim}"))
-            .text("Add inclusion pattern")
 
         opt[String]("filter")
             .optional()
             .unbounded()
             .action((x, c) => c.copy(filterRules = c.filterRules :+ x.trim))
             .text("Add a filter rule")
+
+        opt[String]("include")
+            .optional()
+            .unbounded()
+            .action((x, c) => c.copy(filterRules = c.filterRules :+ s"+ ${x.trim}"))
+            .text("Add inclusion pattern (this is an alias for: --filter '+ PATTERN')")
+
+        opt[String]("exclude")
+            .optional()
+            .unbounded()
+            .action((x, c) => c.copy(filterRules = c.filterRules :+ s"- ${x.trim}"))
+            .text("Add exclusion pattern (this is an alias for: --filter '- PATTERN')")
 
         arg[URI]("src")
             .action((x, c) => c.copy(src = x))
@@ -152,12 +155,7 @@ object HdfsRsyncCLI {
             .action((x, c) => c.copy(dst = Some(x)))
             .text("Fully qualifier destination folder URI. If not specified, log copied files")
 
-
-        checkConfig(c =>
-            if (c.ignoreTimes && c.sizeOnly) failure("Cannot skip-times and use size-only at the same time")
-            else success
-        )
-        checkConfig(_.validate)
+        checkConfig(_.validate.map(Left(_)).getOrElse(Right(())))
     }
 
     def main(args: Array[String]): Unit = {

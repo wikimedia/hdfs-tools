@@ -22,14 +22,16 @@ import org.apache.hadoop.fs.permission.ChmodParser
 import org.apache.hadoop.fs.{FileSystem, Path}
 import org.apache.log4j.{Appender, Level}
 
+import scala.util.matching.Regex
+
 
 /**
  * Configuration class for Hdfs Rsync
  * Some fields are provided through argument-parsing (see [[HdfsRsyncCLI]]),
  * some others are initialized from the former in the initialize method.
  *
- * Validation functions use scopt compliant Either[String, Unit] return types.
- * This type means and error in case Left("Error message"), and a success if Right(()).
+ * Validation functions use Option[String] return type. An empty returned option
+ * means a successful validation, a non-empty one contains the error message.
  */
 case class HdfsRsyncConfig(
     // Arguments
@@ -41,19 +43,22 @@ case class HdfsRsyncConfig(
     preservePerms: Boolean = false,
     preserveTimes: Boolean = false,
     deleteExtraneous: Boolean = false,
+    deleteExcluded: Boolean = false,
     acceptedTimesDiffMs: Long = 1000,
     ignoreTimes: Boolean = false,
     sizeOnly: Boolean = false,
     filterRules: Seq[String] = Seq.empty[String],
-    chmod: Seq[String] = Seq.empty[String],
+    chmodCommands: Seq[String] = Seq.empty[String],
     logLevel: Level = Level.INFO,
-    // Extracted config
+
+    // Internal (need to be initialized)
     srcFs: FileSystem = null,
     srcPath: Path = null,
     dstFs: FileSystem = null,
     dstPath: Path = null,
     chmodFiles: Option[ChmodParser] = None,
     chmodDirs: Option[ChmodParser] = None,
+    parsedFilterRules: Seq[HdfsRsyncFilterRule] = Seq.empty[HdfsRsyncFilterRule],
     // Set hadoop-conf
     hadoopConf: Configuration = new Configuration(),
     // Logging appender - usefull to manage logging in tests
@@ -68,7 +73,7 @@ case class HdfsRsyncConfig(
     // Group 1: Include/exclude
     // Group 2: Modifiers (! is NOT MATCHING, / means checked against absolute pathname)
     // Group 3: actual pattern
-    private val filterRulesPattern = "^([+-])([!/]?) (.*)$"
+    private val filterRulePattern = "^([+-])(!?/?|/!) ([^ ].*)$".r
 
     /**
      * Get either local or hadoop filesystem for the given URI
@@ -84,31 +89,49 @@ case class HdfsRsyncConfig(
     }
 
     /**
+     * function concatenating multiple error messages into a single one.
+     * @param errorMessages the errorMessages to concatenate
+     * @param errorMessageHeader the header to use for the errorMessages group
+     * @return some concatenated error message if errorMessages is not empty, None otherwise
+     */
+    private def prepareErrorMessage(errorMessages: Seq[String], errorMessageHeader: String): Option[String] = {
+        if (errorMessages.isEmpty) {
+            None
+        } else {
+            Some(s"$errorMessageHeader\n${errorMessages.map(s => s"\t$s").mkString("\n")}")
+        }
+    }
+
+    /********************************************************************************
+     * Parameters validation functions
+     */
+
+    /**
      * Generic function to validate src and dst URIs.
      * Valid URIs define scheme, are absolute and are:
      *  - Glob patterns returning non-null value (src)
      *  - existing folders (dst)
      * @param uri the uri to validate
      * @param isSrc whether to check for src (when true) or dst (when false)
-     * @return Left("Error messages") if validation fails, Right(()) otherwise.
+     * @return None if validation succeeds, Some(error-message) otherwise.
      */
-    private def validateURI(uri: URI, isSrc: Boolean): Either[String, Unit] = {
+    private def validateURI(uri: URI, isSrc: Boolean): Option[String] = {
         val paramName = if (isSrc) "src" else "dst"
         try {
-            if (uri.getScheme == null || uri.getScheme.isEmpty) Left(s"Error validating $paramName: $uri does not specify scheme")
-            else if (uri.getPath == null || !uri.getPath.startsWith("/")) Left(s"Error validating $paramName: $uri is not absolute")
+            if (uri.getScheme == null || uri.getScheme.isEmpty) Some(s"Error validating $paramName: $uri does not specify scheme")
+            else if (uri.getPath == null || !uri.getPath.startsWith("/")) Some(s"Error validating $paramName: $uri is not absolute")
             else {
                 val fs = getFS(uri)
                 val path = new Path(uri)
                 // Using globStatus to check for path existence/files to copy as src can be a glob
                 val globResult = fs.globStatus(path)
                 if (globResult != null)
-                    if (isSrc || fs.isDirectory(path)) Right(())
-                    else Left(s"Error validating $paramName: $uri is not a directory")
-                else Left(s"Error validating $paramName: $uri does not exist")
+                    if (isSrc || fs.isDirectory(path)) None
+                    else Some(s"Error validating $paramName: $uri is not a directory")
+                else Some(s"Error validating $paramName: $uri does not exist")
             }
         } catch {
-            case e: IOException => Left(s"Error validating $paramName: ${e.getMessage}")
+            case e: IOException => Some(s"Error validating $paramName: ${e.getMessage}")
         }
     }
 
@@ -116,17 +139,17 @@ case class HdfsRsyncConfig(
      * Validate src - should be a valid URI for a glob pattern returning non-null result
      * Note: Globs returning null are patterns without special characters not matching any file.
      * Patterns with special characters not matching any file return an empty list.
-     * @return Left("Error messages") if src validation fails, Right(()) otherwise.
+     * @return None if validation succeeds, Some(error-message) otherwise.
      */
-    def validateSrc: Either[String, Unit] = validateURI(src, isSrc = true)
+    def validateSrc: Option[String] = validateURI(src, isSrc = true)
 
     /**
      * Validate dst - should be a valid URI for an existing directory
-     * @return Left("Error message") if dst validation fails, Right(()) otherwise.
+     * @return None if validation succeeds, Some(error-message) otherwise.
      */
-    def validateDst: Either[String, Unit] = {
+    def validateDst: Option[String] = {
         // As dst is an option we apply validation only if it is defined and succeed otherwise
-        dst.map(dstVal => validateURI(dstVal, isSrc = false)).getOrElse(Right(()))
+        dst.map(dstVal => validateURI(dstVal, isSrc = false)).getOrElse(None)
     }
 
     /**
@@ -136,9 +159,14 @@ case class HdfsRsyncConfig(
      *  - The command list should either contain a single octal command or multiple symbolic ones,
      *    for both files and directories (we validate so by counting them as we validate the commands).
      *
-     * @return Left("Error messages") if chmods validation fails, Right(()) otherwise.
+     * Validation is made by folding chmod commands accumulating invalid patterns and numbers used
+     * for global validation in the dedicated ChmodValidationAcc class.
+     * After accumulation, number-check-errors and invalid patterns error are gathered and prepared
+     * as a single message using [[prepareErrorMessage()]].
+     *
+     * @return None if validation succeeds, Some(error-message) otherwise.
      */
-    def validateChmods: Either[String, Unit] = {
+    def validateChmods: Option[String] = {
 
         // this case class is used as an accumulator to count
         // octal and symbolic chmod commands for both files and dirs
@@ -148,7 +176,7 @@ case class HdfsRsyncConfig(
             symbolicFileNum: Int = 0, symbolicDirNum: Int = 0
         )
 
-        val validationAcc: ChmodValidationAcc = chmod.foldLeft(new ChmodValidationAcc())((acc, mod) => {
+        val validationAcc: ChmodValidationAcc = chmodCommands.foldLeft(new ChmodValidationAcc())((acc, mod) => {
             mod match {
                 case chmodOctalPattern(t, _*) =>
                     t match {
@@ -168,84 +196,146 @@ case class HdfsRsyncConfig(
             }
         })
 
-        // Error message generation from numbers checks
-        val wrongNumbersErrorMessages = {
+        // Error message generation
+        val errorMessages = {
             // Using list concatenation chain checks for conciseness
-            (if (validationAcc.octalFileNum > 1) Seq("Only one octal chmod command is allowed for files") else Nil) ++
+            (if (validationAcc.invalids.nonEmpty) Seq(s"Invalid chmod patterns: ${validationAcc.invalids.mkString(", ")}") else Nil) ++
+                (if (validationAcc.octalFileNum > 1) Seq("Only one octal chmod command is allowed for files") else Nil) ++
                 (if (validationAcc.octalDirNum > 1) Seq("Only one octal chmod command is allowed for dirs") else Nil) ++
                 (if (validationAcc.octalFileNum == 1 && validationAcc.symbolicFileNum > 0) Seq("Can't have both octal and symbolic chmod commands for files") else Nil) ++
                 (if (validationAcc.octalDirNum == 1 && validationAcc.symbolicDirNum > 0) Seq("Can't have both octal and symbolic chmod commands for dirs") else Nil)
         }
-        val invalids = validationAcc.invalids
 
-        if (invalids.isEmpty && wrongNumbersErrorMessages.isEmpty) Right(())
-        else {
-            val errorMessage = {
-                "Incorrect chmod parameters:" +
-                    (if (invalids.nonEmpty) s"\n\tInvalid chmod patterns: ${invalids.mkString(", ")}" else "") +
-                    (if (wrongNumbersErrorMessages.nonEmpty) "\n" + wrongNumbersErrorMessages.map(s => s"\t$s").mkString("\n") else "")
-            }
-            Left(errorMessage)
-        }
+        prepareErrorMessage(errorMessages, "Error validating chmod commands:")
     }
 
     /**
      * Validate the list of filter rules.
+     *
+     * Validation is made by folding filter rules accumulating invalid rules in a Seq.
+     * After accumulation, single optional error message is prepared using [[prepareErrorMessage()]].
+     *
+     * @return None if validation succeeds, Some(error-message) otherwise.
      */
-    def validateFilterRules: Either[String, Unit] = {
-        // TODO
-        Right(())
+    def validateFilterRules: Option[String] = {
+        val errorMessages = filterRules.foldLeft(Seq.empty[String])((accumulatedErrorMessages, filterRule) => {
+            filterRule match {
+                case filterRulePattern(_*) => accumulatedErrorMessages
+                case _ => accumulatedErrorMessages :+ s"Invalid filter rule: $filterRule"
+            }
+        })
+
+        prepareErrorMessage(errorMessages, "Error validating filter rules:")
+    }
+
+    /**
+     * This function validates that some boolean options are (or not) called simultaneously:
+     *  - sizeOnly and ignoreTimes shouldn't be set simultaneously
+     *  - delete-excluded should only be set in conjunction with delete
+     * @return None if validation succeeds, Some(error-message) otherwise.
+     */
+    def validateFlags: Option[String] = {
+        val errorMessages = {
+            (if (ignoreTimes && sizeOnly) Seq("skip-times and use size-only can't be used simultaneously") else Nil) ++
+                (if (deleteExcluded && !deleteExtraneous) Seq("delete-excluded must be used in conjunction with delete") else Nil)
+        }
+
+        prepareErrorMessage(errorMessages, "Error validating flags:")
     }
 
     /**
      * Validate the whole config at once.
-     * This allows for the scopt parser to be provided with all
-     * error messages at once instead of failing at the first one.
+     * This allows for the scopt parser to be provided with all error messages at once
+     * instead of failing at the first one.
      *
-     * The error messages concatenation is done by folding validation functions
-     * results, accumulating errors. The fold is initialized with Right(()) (success),
-     * and at each stage checks for the function result. It returns an updated (error) status
-     * if the function result is an error.
+     * The error messages concatenation is done by folding validation functions results,
+     * accumulating errors as Option[String]. The fold is initialized with None(success),
+     * and at each stage checks for the function result. It returns an updated (error)
+     * status if the function result is an error.
      *
-     * @return Left("Error messages") if validation fails, Right(()) otherwise.
+     * @return None if validation succeeds, Some(error-message) otherwise.
      */
-    def validate: Either[String, Unit] = {
+    def validate: Option[String] = {
         Seq(
             validateSrc,
             validateDst,
             validateChmods,
-            validateFilterRules
-        ).fold(Right(()))((currentStatus, newResult) => {
-            // newResult is a success, return unchanged currentStatus
-            if (newResult.isRight) {
-                currentStatus
+            validateFilterRules,
+            validateFlags
+        ).fold(None)((accumulatedValidationResults, newValidationResult) => {
+            // newValidationResult is a success, return unchanged accumulatedValidationResults
+            if (newValidationResult.isEmpty) {
+                accumulatedValidationResults
             } else {
-                if (currentStatus.isRight) {
-                    // First error we encounter (currentStatus would be Left otherwise)
-                    // Add error message header to newResult message
-                    Left(s"Argument parsing error:\n\t${newResult.left.get}")
+                if (accumulatedValidationResults.isEmpty) {
+                    // First error we encounter (accumulatedValidationResults would not be empty otherwise)
+                    // Add error message header to newValidationResult message
+                    Some(s"Argument parsing error:\n\t${newValidationResult.get}")
                 } else {
-                    // there is already existing errors and a new one - Concatenate them
-                    Left(s"${currentStatus.left.get}\n\t${newResult.left.get}")
+                    // there is already existing error(s) and a new one - Concatenate them
+                    Some(s"${accumulatedValidationResults.get}\n\t${newValidationResult.get}")
                 }
             }
         })
     }
 
-    // Rebuild a chmod string for either files (F) or dirs (D) from validated chmods.
-    // This chmod will then be passed to hadoop-FS ChmodParser
-    private def makeChmodString(chmods: Seq[String], files: Boolean): Option[String] = {
-        val (sw, dr) = if (files) ("D", 'F') else ("F", 'D')
-        chmods.foldLeft(None.asInstanceOf[Option[String]])((acc, mod) => {
-            if (!mod.startsWith(sw))
-                if (acc.isEmpty) Some(mod.dropWhile(c => c == dr))
+    /********************************************************************************
+     * Functions and classes needed for config initialization of internals
+     */
+
+    /**
+     * Create an optional HDFS [[ChmodParser]] from a rebuilt chmod string (comma-separated
+     * chmod commands) for either files or dirs. The rebuilt command string is extracted from
+     * the fully validated list of chmod commands as follow: the full command list is fold,
+     * concatenating in an option the files or directory commands with the 'F' or 'D' prefix
+     * removed if any.
+     * The ChmodParser is then created if the fold has generated some command.
+     *
+     * @param chmods the validated sequence of commands containing both files and dirs commands
+     * @param files whether the generated command string should be for files or for dirs
+     * @return the generated comma-separated chmod command for either files or dirs, if any
+     */
+    private def getChmodParser(chmods: Seq[String], files: Boolean): Option[ChmodParser] = {
+        val (inversePrefix, prefixToRemove) = if (files) ("D", 'F') else ("F", 'D')
+        val rebuiltString = chmods.foldLeft(None.asInstanceOf[Option[String]])((acc, mod) => {
+            // It's important to use a negative match of inversePrefix here as we want to keep both
+            // prefixed commands and not-prefixed commands applying to both.
+            if (! mod.startsWith(inversePrefix))
+                if (acc.isEmpty) Some(mod.dropWhile(c => c == prefixToRemove))
                 else Some(s"${acc.get},$mod")
             else acc
         })
+        rebuiltString.map(new ChmodParser(_))
     }
 
     /**
-     * Function initializing inner-values of the config after parameters validation has been done
+     *
+     * @param filterRule
+     * @return
+     */
+    def getParsedFilterRule(filterRule: String): HdfsRsyncFilterRule = {
+        filterRule match {
+            case filterRulePattern(rawType, rawModifiers, rawPattern) =>
+                val pattern =  java.nio.file.FileSystems.getDefault.getPathMatcher(rawPattern)
+                new HdfsRsyncFilterRule(
+                    ruleType = if (rawType == "+") Include() else Exclude(),
+                    pattern = pattern,
+                    oppositeMatch = rawModifiers.contains('!'),
+                    fullPathCheck = rawModifiers.contains('/') ||
+                        rawPattern.dropRight(1).contains('/') ||
+                        rawPattern.contains("**"),
+                    anchoredToRoot = rawPattern.startsWith("/"),
+                    directoryOnly = rawPattern.endsWith("/")
+                )
+        }
+    }
+
+    /**
+     * Function initializing inner-values of the config after parameters validation has been done.
+     *
+     * It initializes filesystem-api reused fields (srcFs, dstFs, srcPath, dstPath), and prebuilt
+     * HDFS ChmodParser for both files and dirs (if any)
+     *
      * @return a new config with initialized values
      */
     def initialize: HdfsRsyncConfig = {
@@ -262,8 +352,10 @@ case class HdfsRsyncConfig(
             }).orNull,
             dstPath = dst.map(d => new Path(d)).orNull,
 
-            chmodFiles = makeChmodString(chmod, files = true).map(new ChmodParser(_)),
-            chmodDirs = makeChmodString(chmod, files = false).map(new ChmodParser(_))
+            chmodFiles = getChmodParser(chmodCommands, files = true),
+            chmodDirs = getChmodParser(chmodCommands, files = false),
+
+            parsedFilterRules =
         )
     }
 }

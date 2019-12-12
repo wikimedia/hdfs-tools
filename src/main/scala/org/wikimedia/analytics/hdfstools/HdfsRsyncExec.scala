@@ -35,7 +35,6 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
     val log: Logger = {
         val l = Logger.getLogger(this.getClass)
         l.setLevel(config.logLevel)
-        //
         if (config.logAppender.isEmpty) {
             l.addAppender(
                 new ConsoleAppender(
@@ -43,13 +42,14 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
         } else {
             config.logAppender.foreach(appender => l.addAppender(appender))
         }
-
         l
     }
 
-    //*******************************************
-    // Functions for files/folders copy / update / skip
-    //*******************************************
+
+    /********************************************************************************
+     * Functions for files/folders copy / update / skip
+     */
+
 
     /**
      * This function is called when a source file/folder is not yet present in dst.
@@ -133,9 +133,11 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
         Right(config.dstFs.getFileStatus(target))
     }
 
-    //*******************************************
-    // Functions for files/folders metadata updates (permissions / modification time)
-    //*******************************************
+
+    /********************************************************************************
+     * Functions for files/folders metadata updates (permissions / modification time)
+     */
+
 
     /**
      * This function checks whether modificationTimestamp of src and dst can be considered
@@ -242,14 +244,14 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
         }
     }
 
-    //*******************************************
-    // Main processing functions (and helpers)
-    //  - Process a single pair src/dst
-    //  - Process a folder-tree level
-    //*******************************************
 
-    //
-    //
+    /********************************************************************************
+     * Main processing functions (and helpers)
+     *  - Process a single pair src/dst
+     *  - Process a folder-tree level
+     */
+
+
     /**
      * Function processing a single src (file or folder), for a given dst (folder where to copy/update)
      * with an existing target being found or not (same filename as src in dst).
@@ -357,7 +359,6 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
             })
         }
     }
-
 
     /**
      * Function applying rsync at a folder-tree level.

@@ -20,11 +20,6 @@ class TestHdfsRsyncExec extends AnyFlatSpec with Matchers with BeforeAndAfterEac
     // Reused values
     val tmpDstBaseFile = new File(tmpDstBase)
 
-    val originalConfig = new HdfsRsyncConfig()
-    // To turn on console logging in tests, comment next line and uncomment the one after
-    val baseConfig = originalConfig.copy(logAppender = Seq(testLogAppender))
-    //val baseConfig = originalConfig.copy(logAppender = originalConfig.logAppender :+ testLogAppender)
-
     private def checkTmpDstEqualsTmpSrc(): Unit = {
         val tmpContent = tmpDstBaseFile.list()
         tmpContent.size should equal(1)
@@ -275,7 +270,7 @@ class TestHdfsRsyncExec extends AnyFlatSpec with Matchers with BeforeAndAfterEac
             dst = Some(tmpDstBase),
             recurse = true,
             preserveTimes = true,
-            chmod = Seq("F600", "D750")
+            chmodCommands = Seq("F600", "D750")
         ).initialize
         new HdfsRsyncExec(config).apply()
 
@@ -290,7 +285,7 @@ class TestHdfsRsyncExec extends AnyFlatSpec with Matchers with BeforeAndAfterEac
         // Drop copied file to copy it again with new chmod perms
         new File(tmpDstFolder1File2).delete()
 
-        val newConfig = config.copy(chmod = Seq("F640")).initialize
+        val newConfig = config.copy(chmodCommands = Seq("F640")).initialize
         new HdfsRsyncExec(newConfig).apply()
 
         // Checking chmod has been applied to new file only
@@ -314,7 +309,7 @@ class TestHdfsRsyncExec extends AnyFlatSpec with Matchers with BeforeAndAfterEac
             recurse = true,
             preserveTimes = true,
             preservePerms = true,
-            chmod = Seq("F600", "D750")
+            chmodCommands = Seq("F600", "D750")
         ).initialize
         new HdfsRsyncExec(config).apply()
 
@@ -330,7 +325,7 @@ class TestHdfsRsyncExec extends AnyFlatSpec with Matchers with BeforeAndAfterEac
         new File(tmpDstFolder1File2).delete()
 
         // Checking chmod has been applied to all files including existing ones
-        val newConfig = config.copy(chmod = Seq("F640", "D700")).initialize
+        val newConfig = config.copy(chmodCommands = Seq("F640", "D700")).initialize
         new HdfsRsyncExec(newConfig).apply()
 
         // Not checking simple copy, going aight for file permissions

@@ -4,8 +4,8 @@ import java.io.File
 import java.net.URI
 
 import org.apache.commons.io.FileUtils
+import org.apache.log4j.AppenderSkeleton
 import org.apache.log4j.spi.LoggingEvent
-import org.apache.log4j.{AppenderSkeleton, Logger}
 
 
 trait TestHdfsRsyncHelper {
@@ -26,7 +26,11 @@ trait TestHdfsRsyncHelper {
     }
 
     val testLogAppender = new TestLogAppender()
-    val consoleLogAppender = new TestLogAppender()
+
+    val originalConfig = new HdfsRsyncConfig()
+    // To turn on console logging in tests, comment next line and uncomment the one after
+    val baseConfig = originalConfig.copy(logAppender = Seq(testLogAppender))
+    //val baseConfig = originalConfig.copy(logAppender = originalConfig.logAppender :+ testLogAppender)
 
     val userTmp = "/tmp/" + System.getProperty("user.name")
 
