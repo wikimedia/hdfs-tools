@@ -6,16 +6,9 @@ import java.nio.file.attribute.{PosixFileAttributes, PosixFilePermissions}
 import java.nio.file.{Files, Paths}
 
 import org.apache.log4j.Level
-import org.scalatest.BeforeAndAfterEach
-import org.scalatest.flatspec.AnyFlatSpec
-import org.scalatest.matchers.should.Matchers
 
 
-class TestHdfsRsyncExec extends AnyFlatSpec with Matchers with BeforeAndAfterEach with TestHdfsRsyncHelper {
-
-    override def beforeEach(): Unit = helperBefore()
-
-    override def afterEach(): Unit = helperAfter()
+class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
 
     // Reused values
     val tmpDstBaseFile = new File(tmpDstBase)
