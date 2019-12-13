@@ -23,6 +23,8 @@ import org.apache.hadoop.fs.permission.ChmodParser
 import org.apache.hadoop.fs.{FileSystem, Path}
 import org.apache.log4j.{Appender, Level}
 
+import scala.util.Try
+
 
 /**
  * Configuration class for Hdfs Rsync
@@ -127,6 +129,16 @@ case class HdfsRsyncConfig(
      * Parameters validation functions
      */
 
+    def findFirstExistingParent(path: Path, fs: FileSystem): Option[Path] = {
+        if (path == null) {
+            None
+        } else if (fs.exists(path)) {
+            Some(path)
+        } else {
+            findFirstExistingParent(path.getParent, fs)
+        }
+    }
+
     /**
      * Generic function to validate src and dst URIs.
      * Valid URIs define scheme, are absolute and are:
@@ -147,7 +159,8 @@ case class HdfsRsyncConfig(
                 val globResult = fs.globStatus(path)
                 if (globResult != null)
                     if (isSrc || fs.isDirectory(path)) None
-                    else Some(s"$uri is not a directory")
+                    else Some(s"$uri dst dir cannot be created")
+                else if (!isSrc && Try(fs.mkdirs(path)).isSuccess) None
                 else Some(s"$uri does not exist")
             }
         } catch {

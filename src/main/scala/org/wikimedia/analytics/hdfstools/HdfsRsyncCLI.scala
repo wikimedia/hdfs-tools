@@ -32,7 +32,8 @@ object HdfsRsyncCLI {
               |To prevent mistakes between local and remote filesystems, src and dst have to be provided as
               |fully qualified absolute URIs, for instance file:/home or hdfs:///user/hive.
               |
-              |src should be globs leading to some existing files and dst should be an existing folder.
+              |src should be globs leading to some existing files and dst should be a folder, existing
+              |or at a path where it can be created.
               |
               |Note: a trailing slash in src (as in /example/src/) is changed to a pattern matching only the
               |      directory content (as in /example/src/*) mimicking standard rsync behavior.

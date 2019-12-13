@@ -1,5 +1,6 @@
 package org.wikimedia.analytics.hdfstools
 
+import java.io.File
 import java.net.URI
 
 
@@ -21,9 +22,13 @@ class TestHdfsRsyncConfig extends TestHdfsRsyncHelper {
 
     it should "validate dst URI" in {
         // Invalid case (folder doesn't exist)
-        baseConfig.copy(allURIs = Seq(tmpSrcFile1, tmpSrcFile1)).validateDst should equal(Some(s"Error validating dst:\n\t$tmpSrcFile1 is not a directory"))
+        baseConfig.copy(allURIs = Seq(tmpSrcFile1, tmpSrcFile1)).validateDst should equal(Some(s"Error validating dst:\n\t$tmpSrcFile1 dst dir cannot be created"))
         // Valid case
         baseConfig.copy(allURIs = Seq(tmpSrcFile1, tmpSrc)).validateDst should equal(None)
+        // Valid case with folder creation
+        val uri = new URI(s"$tmpSrc/test_folder_creation")
+        baseConfig.copy(allURIs = Seq(tmpSrcFile1, uri)).validateDst should equal(None)
+        new File(uri).exists() should equal(true)
     }
 
     it should "validate chmod commands" in {
