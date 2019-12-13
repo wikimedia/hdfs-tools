@@ -24,24 +24,19 @@ object HdfsRsyncCLI {
     /**
      * Command line options parser
      */
-    val argsParser = new OptionParser[HdfsRsyncConfig]("HDFS-Rsync") {
-        head("HDFS-Rsync Tool", "Provides rsync equivalent to copy data between HDFS and local FS.")
+    val argsParser = new OptionParser[HdfsRsyncConfig]("hdfs-rsync") {
+        head("hdfs-rsync", "Provides an rsync equivalent to copy data between HDFS and local FS.")
 
         note(
             """
               |To prevent mistakes between local and remote filesystems, src and dst have to be provided as
               |fully qualified absolute URIs, for instance file:/home or hdfs:///user/hive.
               |
-              |src should be a glob leading to some existing files and dst should be an existing folder.
+              |src should be globs leading to some existing files and dst should be a folder, existing
+              |or at a path where it can be created.
               |
               |Note: a trailing slash in src (as in /example/src/) is changed to a pattern matching only the
-              |      directory content (as in /example/src/*) mimicing standard rsync behavior.
-              |
-              |Note: The behavior of HdfsRsync differs from the standard rsync one when src is a folder and the
-              |      algorithm runs without recursion: original rsync skips the folders, while we copy the folder
-              |      and its content at once if it is not present, or overwrite the full folder at once if modifi-
-              |      cation timestamp differs (this is equivalent to do rm -r dir && cp -R).
-              |      This feature can be useful to overwrite full folders when they have been modifed.
+              |      directory content (as in /example/src/*) mimicking standard rsync behavior.
               |
               |Syntax for filter/include/exclude rules is similar to the standard rsync one:
               | * One rule per command-line option.
@@ -55,6 +50,8 @@ object HdfsRsyncCLI {
               |       against full path even if no '/' or ''), or both.
               |     - PATTERN is the pattern to match.
               |   Note: A single space is expected between the rule and modifier char sequence and the pattern.
+              |   Note: Use quotes around the rules when you use wildcard patterns to prevent the shell
+              |         interpreting them.
               |
               | About patterns:
               | * Pattern wildcard characters are: '*', '**', '?', (see rsync doc). You can escape wildcards
@@ -153,16 +150,16 @@ object HdfsRsyncCLI {
             .action((x, c) => c.copy(filterRules = c.filterRules :+ s"- ${x.trim}"))
             .text("Add exclusion pattern (this is an alias for: --filter '- PATTERN')")
 
-        arg[URI]("src")
-            .action((x, c) => c.copy(src = x))
-            .text("Fully qualified source pattern URI")
-
-        arg[URI]("dst")
-            .optional()
-            .action((x, c) => c.copy(dst = Some(x)))
-            .text("Fully qualifier destination folder URI. If not specified, log copied files")
+        // This is a hack to overcome scopt limitiation of having to put unbounded argument
+        // as last option. We store all URIs in allURIs and the take the first n-1 ones for
+        // srcList and the last one for dst.
+        arg[URI]("src...[dst]")
+            .unbounded()
+            .action((x, c) => c.copy(allURIs = c.allURIs :+ x))
+            .text("Fully qualified URI, one or more sources followed by zero or one destination")
 
         checkConfig(_.validate.map(Left(_)).getOrElse(Right(())))
+
     }
 
     def main(args: Array[String]): Unit = {
