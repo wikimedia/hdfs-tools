@@ -8,7 +8,7 @@
 
     <groupId>org.wikimedia.analytics</groupId>
     <artifactId>hdfs-tools</artifactId>
-    <version>0.0.1</version>
+    <version>0.0.2-SNAPSHOT</version>
     <packaging>jar</packaging>
 
     <organization>
