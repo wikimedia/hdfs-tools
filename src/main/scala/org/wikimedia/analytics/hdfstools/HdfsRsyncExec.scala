@@ -389,7 +389,7 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
      */
     private def getSrcsList(srcs: Seq[(Path, BasePath)]): Map[String, Seq[(FileStatus, BasePath)]] = {
 
-        srcs.flatMap((srcAndBasePath: (Path, Option[Path])) => {
+        srcs.flatMap((srcAndBasePath: (Path, BasePath)) => {
             val (src, basePath) = srcAndBasePath
             // Root of the tree
             // use glob to get directory content and set basePath from listed files
@@ -446,7 +446,7 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
     /**
      * This function either processes a directory (create if needed, recurse if flag is set and
      * all sources are directories), or processes a file if it is alone in its list.
-     * If the list contains incoherent objects (both files and directories, or multiple files),
+     * If the srcs contains incoherent objects (both files and directories, or multiple files),
      * an [[IllegalStateException]] is thrown.
      *
      * @param srcs the list of files sharing the same filename (and therefore target).
@@ -454,7 +454,7 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
      * @param target the target of the directorie(s) or file (if any).
      * @param existingTarget the reference to the already existing object at target path.
      */
-    private def mergeOrProcessCoherentSrcsList(
+    private def processSrcs(
         srcs: Seq[(FileStatus, BasePath)],
         target: Option[Path],
         existingTarget: Option[FileStatus]
@@ -487,7 +487,7 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
     /**
      * Function applying rsync at a directory-tree level.
      * It lists content from src and dst, applies dst extraneous deletion (if any),
-     * and calls the [[mergeOrProcessCoherentSrcsList]] function to handle
+     * and calls the [[processSrcs]] function to handle
      * filename-coherent src lists.
      *
      * @param parentSrcs the parent srcs list from which content is to be rsynced
@@ -524,7 +524,7 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
             // Process the reminder of srcs not filtered out by rules, with target and
             // existingTarget
             if (filteredSrcList.nonEmpty) {
-                mergeOrProcessCoherentSrcsList(filteredSrcList, target, existingTarget)
+                processSrcs(filteredSrcList, target, existingTarget)
             }
         })
     }
