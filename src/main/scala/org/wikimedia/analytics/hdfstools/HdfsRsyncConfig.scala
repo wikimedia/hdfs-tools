@@ -39,7 +39,7 @@ case class HdfsRsyncConfig(
     // This value is a hack to overcome scopt limitation
     // of having unbounded args as the last option.
     allURIs: Seq[URI] = Seq.empty[URI],
-    srcList: Seq[URI] = Seq.empty[URI],
+    srcsList: Seq[URI] = Seq.empty[URI],
     dst: Option[URI] = None,
     // Options
     dryRun: Boolean = false,
@@ -57,7 +57,7 @@ case class HdfsRsyncConfig(
 
     // Internal (need to be initialized)
     srcFs: FileSystem = null,
-    srcPathList: Seq[Path] = Seq.empty[Path],
+    srcPathsList: Seq[Path] = Seq.empty[Path],
     dstFs: FileSystem = null,
     dstPath: Path = null,
     chmodFiles: Option[ChmodParser] = None,
@@ -84,7 +84,7 @@ case class HdfsRsyncConfig(
      * @return the n-1 first elements of allURIs if it contains more than one element,
      *         allURIs otherwise.
      */
-    private def getSrcList: Seq[URI] = {
+    private def getSrcsList: Seq[URI] = {
         if (allURIs.size > 1) allURIs.dropRight(1) else allURIs
     }
 
@@ -96,7 +96,6 @@ case class HdfsRsyncConfig(
     private def getDst: Option[URI] = {
         if (allURIs.size > 1) Some(allURIs.last) else None
     }
-
 
     /**
      * Get either local or hadoop filesystem for the given URI
@@ -129,16 +128,6 @@ case class HdfsRsyncConfig(
      * Parameters validation functions
      */
 
-    def findFirstExistingParent(path: Path, fs: FileSystem): Option[Path] = {
-        if (path == null) {
-            None
-        } else if (fs.exists(path)) {
-            Some(path)
-        } else {
-            findFirstExistingParent(path.getParent, fs)
-        }
-    }
-
     /**
      * Generic function to validate src and dst URIs.
      * Valid URIs define scheme, are absolute and are:
@@ -169,7 +158,7 @@ case class HdfsRsyncConfig(
     }
 
     /**
-     * Validate srcList - They should all be a valid URIs of glob patterns returning non-null result.
+     * Validate srcsList - They should all be a valid URIs of glob patterns returning non-null result.
      * They also all should have the same scheme.
      *
      * Note: Globs returning null are patterns without special characters not matching any file.
@@ -177,8 +166,8 @@ case class HdfsRsyncConfig(
      *
      * @return None if validation succeeds, Some(error-message) otherwise.
      */
-    def validateSrcList: Option[String] = {
-        val srcList = getSrcList
+    def validateSrcsList: Option[String] = {
+        val srcList = getSrcsList // scopt hack, see [[getSrcsList]]
         val sameSchemeError = {
             if (srcList.tail.forall(src => src.getScheme == srcList.head.getScheme)) {
                 None
@@ -198,7 +187,7 @@ case class HdfsRsyncConfig(
      */
     def validateDst: Option[String] = {
         // As dst is an option we apply validation only if it is defined and succeed otherwise
-        val dst = getDst
+        val dst = getDst // scopt hack, see [[getDst]]
         val errors = dst.flatMap(dstVal => validateURI(dstVal, isSrc = false)).toSeq
         prepareErrorMessage(errors, "Error validating dst:")
     }
@@ -308,7 +297,7 @@ case class HdfsRsyncConfig(
      */
     def validate: Option[String] = {
         Seq(
-            validateSrcList,
+            validateSrcsList,
             validateDst,
             validateChmods,
             validateFilterRules,
@@ -393,7 +382,7 @@ case class HdfsRsyncConfig(
                     oppositeMatch = rawModifiers.contains('!'),
                     fullPathCheck = fullPathCheck || forceFullPathCheck,
                     forceFullPathCheck = forceFullPathCheck,
-                    anchoredToRoot = anchoredToRoot,
+                    anchoredToBasePath = anchoredToRoot,
                     directoryOnly = rawPattern.endsWith("/")
                 )
         }
@@ -408,13 +397,15 @@ case class HdfsRsyncConfig(
      * @return a new config with initialized values
      */
     def initialize: HdfsRsyncConfig = {
-        val srcList = getSrcList
-        val dst = getDst
+        val srcsList = getSrcsList // scopt hack, see [[getSrcsList]]
+        val dst = getDst           // scopt hack, see [[getDst]]
         this.copy(
-            srcList = srcList,
-            srcFs = getFS(srcList.head),
+            srcsList = srcsList,
+            srcFs = getFS(srcsList.head),
             // Add * to trailing slash to mimic rsync not copying src last folder but its content
-            srcPathList = srcList.map(src => if (src.toString.endsWith("/")) new Path(s"$src/*") else new Path(src)),
+            srcPathsList = srcsList.map(src => {
+                if (src.toString.endsWith("/")) new Path(s"$src/*") else new Path(src)
+            }),
 
             dst = dst,
             // Only initialize dstFS if dst is defined

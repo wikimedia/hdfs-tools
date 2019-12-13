@@ -8,16 +8,16 @@ class TestHdfsRsyncConfig extends TestHdfsRsyncHelper {
 
     "HdfsRsyncConfig" should "validate src URI" in {
         // Invalid cases
-        baseConfig.copy(allURIs = Seq(new URI("/no/scheme/uri"))).validateSrcList should equal(Some("Error validating src list:\n\t/no/scheme/uri does not specify scheme"))
-        baseConfig.copy(allURIs = Seq(new URI("file:."))).validateSrcList should equal(Some("Error validating src list:\n\tfile:. is not absolute"))
-        baseConfig.copy(allURIs = Seq(new URI("wrongscheme:///"))).validateSrcList should equal(Some("Error validating src list:\n\tscheme must be either 'file' or 'hdfs'"))
-        baseConfig.copy(allURIs = Seq(new URI("file:/this/is/a/non/existent/path"))).validateSrcList should equal(Some("Error validating src list:\n\tfile:/this/is/a/non/existent/path does not exist"))
+        baseConfig.copy(allURIs = Seq(new URI("/no/scheme/uri"))).validateSrcsList should equal(Some("Error validating src list:\n\t/no/scheme/uri does not specify scheme"))
+        baseConfig.copy(allURIs = Seq(new URI("file:."))).validateSrcsList should equal(Some("Error validating src list:\n\tfile:. is not absolute"))
+        baseConfig.copy(allURIs = Seq(new URI("wrongscheme:///"))).validateSrcsList should equal(Some("Error validating src list:\n\tscheme must be either 'file' or 'hdfs'"))
+        baseConfig.copy(allURIs = Seq(new URI("file:/this/is/a/non/existent/path"))).validateSrcsList should equal(Some("Error validating src list:\n\tfile:/this/is/a/non/existent/path does not exist"))
 
         // Valid cases
-        baseConfig.copy(allURIs = Seq(tmpSrcFile1)).validateSrcList should equal(None)
-        baseConfig.copy(allURIs = Seq(tmpSrc)).validateSrcList should equal(None)
-        baseConfig.copy(allURIs = Seq(new URI(s"$tmpSrc/"))).validateSrcList should equal(None)
-        baseConfig.copy(allURIs = Seq(new URI(s"$tmpSrc/*"))).validateSrcList should equal(None)
+        baseConfig.copy(allURIs = Seq(tmpSrcFile1)).validateSrcsList should equal(None)
+        baseConfig.copy(allURIs = Seq(tmpSrc)).validateSrcsList should equal(None)
+        baseConfig.copy(allURIs = Seq(new URI(s"$tmpSrc/"))).validateSrcsList should equal(None)
+        baseConfig.copy(allURIs = Seq(new URI(s"$tmpSrc/*"))).validateSrcsList should equal(None)
     }
 
     it should "validate dst URI" in {

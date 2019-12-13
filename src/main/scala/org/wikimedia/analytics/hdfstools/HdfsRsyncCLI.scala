@@ -24,8 +24,8 @@ object HdfsRsyncCLI {
     /**
      * Command line options parser
      */
-    val argsParser = new OptionParser[HdfsRsyncConfig]("HDFS-Rsync") {
-        head("HDFS-Rsync Tool", "Provides rsync equivalent to copy data between HDFS and local FS.")
+    val argsParser = new OptionParser[HdfsRsyncConfig]("hdfs-rsync") {
+        head("hdfs-rsync tool", "Provides rsync equivalent to copy data between HDFS and local FS.")
 
         note(
             """
