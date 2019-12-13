@@ -141,6 +141,7 @@ case class HdfsRsyncConfig(
      * @return None if validation succeeds, Some(error-message) otherwise.
      */
     def validateSrc: Option[String] = {
+
         val sameSchemeError = {
             if (srcList.tail.forall(src => src.getScheme == srcList.head.getScheme)) None
             else Some("Error validating src list: not all src have same scheme")
@@ -370,18 +371,22 @@ case class HdfsRsyncConfig(
      * @return a new config with initialized values
      */
     def initialize: HdfsRsyncConfig = {
+        val srcL = if (srcList.size > 1) srcList.dropRight(1) else srcList
+        val dstL = if (srcList.size > 1) Some(srcList.last) else None
         this.copy(
-            srcFs = getFS(srcList.head),
+            srcList = srcL,
+            srcFs = getFS(srcL.head),
             // Add * to trailing slash to mimic rsync not copying src last folder but its content
-            srcPathList = srcList.map(src => if (src.toString.endsWith("/")) new Path(s"$src/*") else new Path(src)),
+            srcPathList = srcL.map(src => if (src.toString.endsWith("/")) new Path(s"$src/*") else new Path(src)),
 
+            dst = dstL,
             // Only initialize dstFS if dst is defined
-            dstFs = dst.map(d => {
+            dstFs = dstL.map(d => {
                 val fs = getFS(d)
                 fs.setWriteChecksum(false)
                 fs
             }).orNull,
-            dstPath = dst.map(d => new Path(d)).orNull,
+            dstPath = dstL.map(d => new Path(d)).orNull,
 
             // It's important to use a negative match of inversePrefix here as we want to keep both
             // prefixed commands and not-prefixed commands applying to both.

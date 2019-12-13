@@ -153,17 +153,21 @@ object HdfsRsyncCLI {
             .action((x, c) => c.copy(filterRules = c.filterRules :+ s"- ${x.trim}"))
             .text("Add exclusion pattern (this is an alias for: --filter '- PATTERN')")
 
-        arg[String]("src")
+        arg[String]("src...[dst]")
             .unbounded()
             .action((x, c) => c.copy(srcList = c.srcList :+ new URI(x)))
-            .text("Fully qualified source pattern URI")
+            .text("Fully qualified URI, one or more sources, zero or one destination")
 
-        arg[String]("dst")
-            .optional()
-            .action((x, c) => c.copy(dst = Some(new URI(x))))
-            .text("Fully qualifier destination folder URI. If not specified, log copied files")
-
-        checkConfig(_.validate.map(Left(_)).getOrElse(Right(())))
+        checkConfig(c => {
+            val nc = {
+                if (c.srcList.size > 1) {
+                    c.copy(srcList = c.srcList.dropRight(1), dst = Some(c.srcList.last))
+                } else {
+                    c
+                }
+            }
+            nc.validate.map(Left(_)).getOrElse(Right(()))
+        })
     }
 
     def main(args: Array[String]): Unit = {
