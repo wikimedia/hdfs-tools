@@ -14,6 +14,7 @@
 
 package org.wikimedia.analytics.hdfstools
 
+
 import org.apache.hadoop.fs.permission.{ChmodParser, FsPermission}
 import org.apache.hadoop.fs.{FileStatus, FileUtil, Path}
 import org.apache.log4j.{ConsoleAppender, Logger, PatternLayout}
@@ -57,6 +58,17 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
      */
 
 
+    private def createFolder(target: Path): Either[Path, FileStatus] = {
+        if (config.dryRun) {
+            log.info(s"CREATE_DIR [dryrun] - $target")
+            Left(target)
+        } else {
+            log.debug(s"CREATE_DIR - $target")
+            config.dstFs.mkdirs(target)
+            Right(config.dstFs.getFileStatus(target))
+        }
+    }
+
     /**
      * This function is called when a source file/folder is not yet present in dst.
      * If the copy parameter is set to true, a copy is made from src to target, otherwise
@@ -66,25 +78,15 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
      *
      * @param src the source file/folder FileStatus for the copy/creation
      * @param target the dst path of the newly created object (should contain the same filename as src)
-     * @param copy whether to copy a file or folder or create an empty folder
      * @return Left(Path) in case of dryrun (no FileStatus available), Right(FileStatus) otherwise.
      */
-    private def createOrCopyNew(src: FileStatus, target: Path, copy: Boolean): Either[Path, FileStatus] = {
+    private def copyNew(src: FileStatus, target: Path): Either[Path, FileStatus] = {
         if (config.dryRun) {
-            if (copy) {
-                log.info(s"COPY_FILE [dryrun] - ${src.getPath} --> $target")
-            } else {
-                log.info(s"CREATE_FOLDER [dryrun] - ${src.getPath} --> $target")
-            }
+            log.info(s"COPY_FILE [dryrun] - ${src.getPath} --> $target")
             Left(target)
         } else {
-            if (copy) {
-                log.debug(s"COPY_FILE - ${src.getPath} --> $target")
-                FileUtil.copy(config.srcFs, src.getPath, config.dstFs, target, false, true, config.hadoopConf)
-            } else {
-                log.debug(s"CREATE_FOLDER - ${src.getPath} --> $target")
-                config.dstFs.mkdirs(target)
-            }
+            log.debug(s"COPY_FILE - ${src.getPath} --> $target")
+            FileUtil.copy(config.srcFs, src.getPath, config.dstFs, target, false, true, config.hadoopConf)
             Right(config.dstFs.getFileStatus(target))
         }
     }
@@ -98,25 +100,15 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
      *
      * @param src the source file/folder FileStatus for the update
      * @param target the dst path of the updated object (should contain the same filename as src)
-     * @param copy whether to copy a file or folder or touch a folder
      * @return Left(Path) in case of dryrun (no FileStatus available), Right(FileStatus) otherwise.
      */
-    private def copyUpdate(src: FileStatus, target: Path, copy: Boolean): Either[Path, FileStatus] = {
+    private def copyUpdate(src: FileStatus, target: Path): Either[Path, FileStatus] = {
         if (config.dryRun) {
-            if (copy) {
-                log.info(s"UPDATE_FILE [dryrun] - ${src.getPath} --> $target")
-            } else {
-                log.info(s"UPDATE_FOLDER [dryrun] - ${src.getPath} --> $target")
-            }
+            log.info(s"UPDATE_FILE [dryrun] - ${src.getPath} --> $target")
             Left(target)
         } else {
-            if (copy) {
-                log.debug(s"UPDATE_FILE - ${src.getPath} --> $target")
-                FileUtil.copy(config.srcFs, src.getPath, config.dstFs, target, false, true, config.hadoopConf)
-            } else {
-                log.debug(s"UPDATE_FOLDER - ${src.getPath} --> $target")
-                config.dstFs.setTimes(target, System.currentTimeMillis(), -1)
-            }
+            log.debug(s"UPDATE_FILE - ${src.getPath} --> $target")
+            FileUtil.copy(config.srcFs, src.getPath, config.dstFs, target, false, true, config.hadoopConf)
             Right(config.dstFs.getFileStatus(target))
         }
     }
@@ -127,15 +119,10 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
      *
      * @param src the skipped source file/folder FileStatus
      * @param target the skipped dst path
-     * @param copy whether the action would have been copy or not
      * @return Right(FileStatus) as skip means the target exists
      */
-    private def skip(src: FileStatus, target: Path, copy: Boolean): Either[Path, FileStatus] = {
-        if (copy) {
-            log.debug(s"SKIP_FILE - ${src.getPath} --> $target")
-        } else {
-            log.debug(s"SKIP_FOLDER - ${src.getPath} --> $target")
-        }
+    private def skip(src: FileStatus, target: Path): Either[Path, FileStatus] = {
+        log.debug(s"SKIP_FILE - ${src.getPath} --> $target")
         Right(config.dstFs.getFileStatus(target))
     }
 
@@ -168,21 +155,21 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
      *               not acutally copied, so no FileStatus available), or a Right(FileStatus)
      *               when available (could be dryrun nonetheless).
      */
-    private def preserveModificationTimesAsNeeded(src: FileStatus, target: Either[Path, FileStatus]): Unit = {
-        if (config.preserveTimes)
-            if (config.dryRun && target.isLeft) {
-                log.info(s"UPDATE_TIMES [dryrun] - ${src.getPath} --> ${target.left.get}")
-            } else { //  Always in Right() case, dryrun-left already checked, and no dryrun means right
+    private def preserveModificationTimes(src: FileStatus, target: Either[Path, FileStatus]): Unit = {
+        if (config.dryRun && target.isLeft) {
+            log.info(s"UPDATE_TIMES [dryrun] - ${src.getPath} --> ${target.left.get}")
+        } else {
+            //  Always in Right() case, dryrun-left already checked, and no dryrun means right
             val targetFileStatus = target.right.get
-                if (approxDiffTimestamps(src, targetFileStatus)) {
-                    if (config.dryRun) {
-                        log.info(s"UPDATE_TIMES [dryrun] - ${src.getPath} --> ${target.right.get.getPath}")
-                    } else {
-                        log.debug(s"UPDATE_TIMES - ${src.getPath} --> ${target.right.get.getPath}")
-                        config.dstFs.setTimes(targetFileStatus.getPath, src.getModificationTime, -1)
-                    }
+            if (approxDiffTimestamps(src, targetFileStatus)) {
+                if (config.dryRun) {
+                    log.info(s"UPDATE_TIMES [dryrun] - ${src.getPath} --> ${target.right.get.getPath}")
+                } else {
+                    log.debug(s"UPDATE_TIMES - ${src.getPath} --> ${target.right.get.getPath}")
+                    config.dstFs.setTimes(targetFileStatus.getPath, src.getModificationTime, -1)
                 }
             }
+        }
     }
 
     /**
@@ -198,9 +185,9 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
      *               when available (could be dryrun nonetheless).
      * @param chmodParser the ChmodParser to use to update permissions (if any)
      */
-    private def updatePerms(src: FileStatus, target: Either[Path, FileStatus], chmodParser: Option[ChmodParser]): Unit = {
+    private def updateFilePerms(src: FileStatus, target: Either[Path, FileStatus], chmodParser: Option[ChmodParser]): Unit = {
         if (config.dryRun && target.isLeft) {
-            log.info(s"UPDATE_PERMS [dryrun] -  ${src.getPath} --> ${target.left.get}")
+            log.info(s"UPDATE_FILE_PERMS [dryrun] -  ${src.getPath} --> ${target.left.get}")
         } else { //  Always in  Right() case, dryrun-left already checked, and no dryrun means right
         val targetFileStatus = target.right.get
             val baseFileStatus = if (config.preservePerms) src else targetFileStatus
@@ -213,39 +200,28 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
             }
             if (targetFileStatus.getPermission != newPerm) {
                 if (config.dryRun) {
-                    log.info(s"UPDATE_PERMS [dryrun] -  ${src.getPath} --> ${target.right.get.getPath}")
+                    log.info(s"UPDATE_FILE_PERMS [dryrun] -  ${src.getPath} --> ${target.right.get.getPath}")
                 } else {
-                    log.debug(s"UPDATE_PERMS -  ${src.getPath} --> ${target.right.get.getPath}")
+                    log.debug(s"UPDATE_FILE_PERMS -  ${src.getPath} --> ${target.right.get.getPath}")
                     config.dstFs.setPermission(targetFileStatus.getPath, newPerm)
                 }
             }
         }
     }
 
-    /**
-     * This function is called to update or not permissions of the target.
-     * Update happens when:
-     *  - perms preservation is on (perms option)
-     *  - chmod commands are defined and new file/folder are created.
-     *  - both
-     *
-     * @param src the src FileStatus from which to get permissions if needed
-     * @param target The dst target to update, as either a Left(path) in case of dryrun (new file
-     *               not acutally copied, so no FileStatus available), or a Right(FileStatus)
-     *               when available (could be dryrun nonetheless).
-     * @param isDir whether the target is directory or not (needed for chmod directory-specific updates)
-     * @param isNew whether the target is new or not, as chmod without perms-preservation is applied
-     *              to new files/folders only
-     */
-    private def updatePermsAsNeeded(src: FileStatus, target: Either[Path, FileStatus], isDir: Boolean, isNew: Boolean): Unit = {
-        // Only apply chmod updates to new files if perms preservation is off
-        if (config.preservePerms ||
-            (isNew && ((isDir && config.chmodDirs.isDefined) || (! isDir && config.chmodFiles.isDefined)))) {
-
-            if (isDir) {
-                updatePerms(src, target, config.chmodDirs)
-            } else {
-                updatePerms(src, target, config.chmodFiles)
+    private def updateDirPerms(target: Either[Path, FileStatus], chmodParser: ChmodParser): Unit = {
+        if (config.dryRun && target.isLeft) {
+            log.info(s"UPDATE_DIR_PERMS [dryrun] - ${target.left.get}")
+        } else { //  Always in  Right() case, dryrun-left already checked, and no dryrun means right
+        val targetFileStatus = target.right.get
+            val newPerm = new FsPermission(chmodParser.applyNewPermission(targetFileStatus))
+            if (targetFileStatus.getPermission != newPerm) {
+                if (config.dryRun) {
+                    log.info(s"UPDATE_DIR_PERMS [dryrun] -  ${target.right.get.getPath}")
+                } else {
+                    log.debug(s"UPDATE_DIR_PERMS -  ${target.right.get.getPath}")
+                    config.dstFs.setPermission(targetFileStatus.getPath, newPerm)
+                }
             }
         }
     }
@@ -263,82 +239,63 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
      * with an existing target being found or not (same filename as src in dst).
      *
      * @param src the src FileStatus to serve as base
-     * @param dst the dst folder where to copy/create new object if necessary (if any)
+     * @param target the dst folder where to copy/create new object if necessary (if any)
      * @param foundTarget the found target in dst (same filename as src) if any
-     * @param copy whether to copy a file or folder, or to create/touch a folder
      * @return Some path if dst was defined (can be a non-existent file in case of dryrun),
      *         None if no dst was provided (logs only).
      */
-    private def processSrcAndDst(
+    private def processFile(
         src: FileStatus,
-        dst: Option[Path],
-        foundTarget: Option[FileStatus],
-        copy: Boolean
-    ): Option[Path] = {
+        target: Option[Path],
+        foundTarget: Option[FileStatus]
+    ): Unit = {
         // If no destination is provided, just log the file to copy
-        if (config.dst.isEmpty) {
-            if (copy) log.info(s"COPY_FILE [no-dst] - ${src.getPath}")
-            else log.info(s"CREATE_FOLDER [no-dst] - ${src.getPath}")
-            None
+        if (target.isEmpty) {
+            log.info(s"COPY_FILE [no-dst] - ${src.getPath}")
         } else {
-            val target = new Path(s"${dst.get.toString}/${src.getPath.getName}")
             val isNew = foundTarget.isEmpty
             val targetToUpdate = {
                 if (isNew) {
-                    createOrCopyNew(src, target, copy)
+                    copyNew(src, target.get)
                 } else if (config.ignoreTimes || // Force copy/update
                     src.getLen != foundTarget.get.getLen || // Size is different
                     (!config.sizeOnly &&                    // Use modificationTime
                         approxDiffTimestamps(src, foundTarget.get))) {
-                    copyUpdate(src, target, copy)
+                    copyUpdate(src, target.get)
                 } else {
-                    skip(src, target, copy)
+                    skip(src, target.get)
                 }
             }
-            preserveModificationTimesAsNeeded(src, targetToUpdate)
-            updatePermsAsNeeded(src, targetToUpdate, isDir = src.isDirectory, isNew)
-            Some(target)
+            if (config.preserveTimes) {
+                preserveModificationTimes(src, targetToUpdate)
+            }
+            // Update perms if needed
+            if (config.preservePerms || (isNew && (isNew && config.chmodFiles.isDefined))) {
+                updateFilePerms(src, targetToUpdate, config.chmodFiles)
+            }
         }
     }
 
-    /**
-     * Function listing files and folders of a src folder or glob (first call before recursion),
-     * and building a Map[filename, FileStatus] from it.
-     *
-     * @param srcPath the src path to scan
-     * @param isBasePath whether to use a glob if true or a folder scan if false
-     * @return the Map[filename, FileStatus] of the folder/glob content
-     */
-    private def getSrcFilesAndFolders(srcPath: Path, isBasePath: Boolean): Map[String, FileStatus] = {
-        // Use globStatus only for recursive tree root, as later we'll always have folders.
-        // This prevent having to use the /* addition to Path for glob to return content folders.
-        if (isBasePath) {
-            val globSrc = config.srcFs.globStatus(srcPath)
-            val globSrcChecked = if (globSrc != null) globSrc.toSeq else Seq.empty
-            globSrcChecked.map(f => (f.getPath.getName, f)).toMap
-        } else {
-            config.srcFs.listStatus(srcPath).map(f => (f.getPath.getName, f)).toMap
+    private def processDir(
+        target: Option[Path],
+        foundTarget: Option[FileStatus]
+    ): Unit = {
+        // Don't log dir info if no dest provided, only file
+        if (target.isDefined) {
+            val isNew = foundTarget.isEmpty
+            val targetToUpdate = {
+                if (isNew) {
+                    createFolder(target.get)
+                } else {
+                    Right(foundTarget.get)
+                }
+            }
+            if (config.chmodDirs.isDefined && (config.preservePerms || isNew )) {
+                updateDirPerms(targetToUpdate, config.chmodDirs.get)
+            }
         }
     }
 
-    /**
-     * Function listing files and folders from an optional dst folder and building a
-     * Map[filename, FileStatus] from it. The map is empty in case if dst path is not defined
-     * or if dst doesn't exist, which can happen in dryrun mode (folder is supposedly created
-     * but not really).
-     *
-     * @param dstPath the optional dst path to scan
-     * @return the Map[filename, FileStatus] of the folder content (if any, empty otherwise)
-     */
-    private def getDstFilesAndFolders(dstPath: Option[Path]): Map[String, FileStatus] = {
-        // If no dst or dst doesn't exist, empty map
-        if (config.dst.isEmpty || ! config.dstFs.exists(dstPath.get)) {
-            Map.empty[String, FileStatus]
-        } else {
-            val fileStatusList = config.dstFs.listStatus(dstPath.get).toSeq
-            fileStatusList.map(f => (f.getPath.getName, f)).toMap
-        }
-    }
 
     /**
      * Function deleting files and folders in dst that are not present in src, if config says so
@@ -352,7 +309,7 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
      *                           as a Map[filename, FileStatus]
      */
     private def deleteExtraneousDstAsNeeded(
-        srcFilesAndFolders: Map[String, FileStatus],
+        srcFilesAndFolders: Map[String, Seq[(FileStatus, Option[Path])]],
         dstFilesAndFolders: Map[String, FileStatus]
     ): Unit = {
         if (config.deleteExtraneous) {
@@ -385,41 +342,68 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
      * If recursion is on, the function calls itself recursively when it meets a directory
      * in the src file list.
      *
-     * @param srcPath the src path to rsync
+     * @param srcPathList the src path list to rsync
      * @param dstPath the dst path to rsync to
-     * @param srcBasePath the src base path, root of the transfer. None if at transfer-root.
      */
     private def applyRecursive(
-        srcPath: Path,
-        dstPath: Option[Path],
-        srcBasePath: Option[Path] = None
+        srcPathList: Seq[(Path, Option[Path])],
+        dstPath: Option[Path]
     ): Unit = {
-        val isBasePath = srcBasePath.isEmpty
 
-        val srcFilesAndFolders = getSrcFilesAndFolders(srcPath, isBasePath)
-        val dstFilesAndFolders = getDstFilesAndFolders(dstPath)
+        val srcFilesAndFolders = srcPathList
+            .flatMap { case (path, basePath) =>
+                val listStatus = if (basePath.isEmpty) config.srcFs.globStatus(path) else config.srcFs.listStatus(path)
+                listStatus.map(f => (f, if (basePath.isEmpty) Some(f.getPath.getParent) else basePath))
+            }.groupBy { case (fileStatus, basePath) => fileStatus.getPath.getName }
+
+        val dstFilesAndFolders = dstPath.toSeq
+            .flatMap(path => {
+                // We need this check for dryrun mode as dst dirs are not created as we recurse into them
+                if (config.dstFs.exists(path)) {
+                    config.dstFs.listStatus(path).map(f => (f.getPath.getName, f))
+                } else {
+                    Seq.empty
+                }
+            })
+            .toMap
 
         // First clean the dst directory from files not in src (if delete flag)
         deleteExtraneousDstAsNeeded(srcFilesAndFolders, dstFilesAndFolders)
 
         // Then copy/update from src to dst
         srcFilesAndFolders.keySet.foreach(srcName => {
-            val src = srcFilesAndFolders(srcName)
+            val srcList = srcFilesAndFolders(srcName)
             val foundTarget = dstFilesAndFolders.get(srcName)
-            // We define basePath for each file in root folder as it can change
-            // in case of src glob, for instance /my/folder/{src1|src2}
-            val basePath = if (isBasePath) src.getPath.getParent else srcBasePath.get
+            val target = dstPath.map(d => new Path(s"$d/$srcName"))
 
             // Apply filter-rules
-            val matchingRule = config.parsedFilterRules.find(rule => rule.matches(src, basePath))
-            if (matchingRule.isDefined && matchingRule.get.ruleType == Exclude()) {
-                log.debug(s"EXCLUDE_SRC - ${src.getPath}")
-            } else {
-                if (config.recurse && src.isDirectory) {
-                    val target = processSrcAndDst(src, dstPath, foundTarget, copy = false)
-                    applyRecursive(src.getPath, target, Some(basePath))
+            val filteredSrcList = srcList.filter { case (src, basePath) =>
+                val matchingRule = config.parsedFilterRules.find(rule => rule.matches(src, basePath.get))
+                if (matchingRule.isDefined && matchingRule.get.ruleType == Exclude()) {
+                    log.debug(s"EXCLUDE_SRC - ${src.getPath}")
+                    false
                 } else {
-                    processSrcAndDst(src, dstPath, foundTarget, copy = true)
+                    true
+                }
+            }
+
+            if (filteredSrcList.nonEmpty) {
+                if (filteredSrcList.forall { case (f, _) => f.isDirectory }) {
+                    if (config.recurse) {
+                        processDir(target, foundTarget)
+                        applyRecursive(filteredSrcList.map { case (f, basePath) => (f.getPath, basePath)}, target)
+                    } else {
+                        filteredSrcList.foreach {case (f, _) => log.debug(s"SKIP_DIR - ${f.getPath}")}
+                    }
+                } else if (filteredSrcList.forall { case (f, _) => f.isFile }) {
+                    if (filteredSrcList.size == 1) {
+                        val (src, _) = filteredSrcList.head
+                        processFile(src, target, foundTarget)
+                    } else {
+                        throw new IllegalStateException("Trying to rsync multiple files with the same name at the same destination")
+                    }
+                } else {
+                    throw new IllegalStateException("Trying to rsync both files and folders with the same name at the same destination")
                 }
             }
         })
@@ -430,7 +414,7 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
      * Applies the recursive function on src and dst as defined in config
      */
     def apply(): Unit = {
-        applyRecursive(config.srcPath, config.dst.map(_ => config.dstPath))
+        applyRecursive(config.srcPathList.map(p => (p, None)), config.dst.map(_ => config.dstPath))
     }
 
 }

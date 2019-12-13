@@ -26,60 +26,43 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
         innerList2 should contain("file_2")
     }
 
-    "HdfsRsyncExec" should "log files to be copied without dst" in {
-
-        val config = baseConfig.copy(src = tmpSrc).initialize
-        new HdfsRsyncExec(config).apply()
-
-        val logEvents = testLogAppender.logEvents
-        logEvents.size should equal(1)
-        logEvents.forall(e => e.getLevel == Level.INFO) should equal(true)
-        val messages = logEvents.map(_.getMessage)
-        // Using  version in messages
-        messages should contain(s"COPY_FILE [no-dst] - $tmpSrc")
-    }
-
-    it should "log files to be copied without dst recursively" in {
+    "HdfsRsyncExec" should "log files to be copied without dst recursively" in {
         val config = baseConfig.copy(
-            src = tmpSrc,
-            recurse = true,
-            dryRun = true
+            srcList = Seq(tmpSrc),
+            recurse = true
         ).initialize
         new HdfsRsyncExec(config).apply()
 
         val logEvents = testLogAppender.logEvents
-        logEvents.size should equal(4)
+        logEvents.size should equal(2)
         logEvents.forall(e => e.getLevel == Level.INFO) should equal(true)
         val messages = logEvents.map(_.getMessage)
         // Using  version in messages
-        messages should contain(s"CREATE_FOLDER [no-dst] - $tmpSrc")
         messages should contain(s"COPY_FILE [no-dst] - $tmpSrcFile1")
-        messages should contain(s"CREATE_FOLDER [no-dst] - $tmpSrcFolder1")
         messages should contain(s"COPY_FILE [no-dst] - $tmpSrcFolder1File2")
     }
 
     it should "log files to be copied without dst recursively with trailing slash" in {
         val config = baseConfig.copy(
-            src = new URI(s"$tmpSrc/"),
+            srcList = Seq(new URI(s"$tmpSrc/")),
             recurse = true,
             dryRun = true
         ).initialize
         new HdfsRsyncExec(config).apply()
 
         val logEvents = testLogAppender.logEvents
-        logEvents.size should equal(3)
+        logEvents.size should equal(2)
         logEvents.forall(e => e.getLevel == Level.INFO) should equal(true)
         val messages = logEvents.map(_.getMessage)
         // Using  version in messages
         messages should contain(s"COPY_FILE [no-dst] - $tmpSrcFile1")
-        messages should contain(s"CREATE_FOLDER [no-dst] - $tmpSrcFolder1")
         messages should contain(s"COPY_FILE [no-dst] - $tmpSrcFolder1File2")
 
     }
 
     it should "log actions in dryrun mode recursively" in {
         val config = baseConfig.copy(
-            src = tmpSrc,
+            srcList = Seq(tmpSrc),
             dst = Some(tmpDstBase),
             recurse = true,
             dryRun = true
@@ -95,48 +78,27 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
         logEvents.forall(e => e.getLevel == Level.INFO) should equal(true)
         val messages = logEvents.map(_.getMessage)
         // Using  version in messages
-        messages should contain(s"CREATE_FOLDER [dryrun] - $tmpSrc --> $tmpDst")
+        messages should contain(s"CREATE_DIR [dryrun] - $tmpDst")
         messages should contain(s"COPY_FILE [dryrun] - $tmpSrcFile1 --> $tmpDstFile1")
-        messages should contain(s"CREATE_FOLDER [dryrun] - $tmpSrcFolder1 --> $tmpDstFolder1")
+        messages should contain(s"CREATE_DIR [dryrun] - $tmpDstFolder1")
         messages should contain(s"COPY_FILE [dryrun] - $tmpSrcFolder1File2 --> $tmpDstFolder1File2")
     }
 
-    it should "copy src to dst NOT recursively and not copy if file/folder match" in {
+    it should "copy src to dst with trailing slash (files only)" in {
         val config = baseConfig.copy(
-            src = tmpSrc,
-            dst = Some(tmpDstBase)
-        ).initialize
-        new HdfsRsyncExec(config).apply()
-
-        checkTmpDstEqualsTmpSrc()
-
-        // Now remove file in folder_1, execute rsync again
-        // File should still be gone because of no recursion
-        new File(tmpDstFolder1File2).delete()
-        new HdfsRsyncExec(config).apply()
-        val innerList3 = new File(tmpDstFolder1).list()
-        innerList3.size should equal(0)
-    }
-
-    it should "copy src to dst with trailing slash " in {
-        val config = baseConfig.copy(
-            src = new URI(s"$tmpSrc/"),
+            srcList = Seq(new URI(s"$tmpSrc/")),
             dst = Some(tmpDstBase)
         ).initialize
         new HdfsRsyncExec(config).apply()
 
         val tmpContent = tmpDstBaseFile.list()
-        tmpContent.size should equal(2)
+        tmpContent.size should equal(1)
         tmpContent should contain("file_1")
-        tmpContent should contain("folder_1")
-        val innerList1 = new File(new URI(s"$tmpDstBase/folder_1")).list()
-        innerList1.size should equal(1)
-        innerList1 should contain("file_2")
     }
 
     it should "copy src to dst recursively with size-only and not copy existing" in {
         val config = baseConfig.copy(
-            src = tmpSrc,
+            srcList = Seq(tmpSrc),
             dst = Some(tmpDstBase),
             recurse = true,
             sizeOnly = true,
@@ -156,14 +118,15 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
         innerList3 should contain("file_2")
 
         val messages = testLogAppender.logEvents.map(_.getMessage.toString)
-        messages.count(_.startsWith("SKIP_")) should equal(3)
+        messages.count(_.startsWith("SKIP_")) should equal(1)
     }
 
     it should "copy src to dst updating modification timestamp" in {
         val config = baseConfig.copy(
-            src = tmpSrc,
+            srcList = Seq(tmpSrc),
             dst = Some(tmpDstBase),
-            preserveTimes = true
+            preserveTimes = true,
+            recurse = true
         ).initialize
         new HdfsRsyncExec(config).apply()
 
@@ -177,7 +140,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
 
     it should "copy src to dst recursively 2 times with ignore-times and preserve-times" in {
         val config = baseConfig.copy(
-            src = tmpSrc,
+            srcList = Seq(tmpSrc),
             dst = Some(tmpDstBase),
             recurse = true,
             preserveTimes = true,
@@ -205,7 +168,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
         testFile.exists() should equal(true)
 
         val config = baseConfig.copy(
-            src = tmpSrc,
+            srcList = Seq(tmpSrc),
             dst = Some(tmpDstBase),
             recurse = true,
             deleteExtraneous = true
@@ -225,7 +188,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
         Files.setPosixFilePermissions(testFilePath, PosixFilePermissions.fromString(testPerms1))
 
         val config = baseConfig.copy(
-            src = tmpSrc,
+            srcList = Seq(tmpSrc),
             dst = Some(tmpDstBase),
             recurse = true,
             preservePerms = true,
@@ -258,7 +221,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
     it should "copy src to dst recursively with time updating perms with chmod (to new files only)" in {
 
         val config = baseConfig.copy(
-            src = tmpSrc,
+            srcList = Seq(tmpSrc),
             dst = Some(tmpDstBase),
             recurse = true,
             preserveTimes = true,
@@ -296,7 +259,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
     it should "copy src to dst recursively with time updating perms with chmod (to old files as well)" in {
 
         val config = baseConfig.copy(
-            src = tmpSrc,
+            srcList = Seq(tmpSrc),
             dst = Some(tmpDstBase),
             recurse = true,
             preserveTimes = true,
@@ -343,7 +306,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
         testFile.exists() should equal(true)
 
         val config = baseConfig.copy(
-            src = tmpSrc,
+            srcList = Seq(tmpSrc),
             dst = Some(tmpDstBase),
             recurse = true,
             deleteExtraneous = true,
@@ -362,7 +325,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
 
     it should "copy src to dst recursively except excluded" in {
         val config = baseConfig.copy(
-            src = tmpSrc,
+            srcList = Seq(tmpSrc),
             dst = Some(tmpDstBase),
             recurse = true,
             sizeOnly = true,

@@ -5,7 +5,7 @@ import org.apache.hadoop.fs.{FileStatus, Path}
 
 class TestHdfsRsyncFilterRule extends TestHdfsRsyncHelper {
 
-    val config = baseConfig.copy(src = tmpSrc).initialize
+    val config = baseConfig.copy(srcList = Seq(tmpSrc)).initialize
 
     var statusFile1, statusFolder1, statusFolder1File2 = null.asInstanceOf[FileStatus]
 

@@ -7,16 +7,16 @@ class TestHdfsRsyncConfig extends TestHdfsRsyncHelper {
 
     "HdfsRsyncConfig" should "validate src URI" in {
         // Invalid cases
-        baseConfig.copy(src = new URI("/no/scheme/uri")).validateSrc should equal(Some("Error validating src: /no/scheme/uri does not specify scheme"))
-        baseConfig.copy(src = new URI("file:.")).validateSrc should equal(Some("Error validating src: file:. is not absolute"))
-        baseConfig.copy(src = new URI("wrongscheme:///")).validateSrc should equal(Some("Error validating src: scheme must be either 'file' or 'hdfs'"))
-        baseConfig.copy(src = new URI("file:/this/is/a/non/existent/path")).validateSrc should equal(Some("Error validating src: file:/this/is/a/non/existent/path does not exist"))
+        baseConfig.copy(srcList = Seq(new URI("/no/scheme/uri"))).validateSrc should equal(Some("Error validating src: /no/scheme/uri does not specify scheme"))
+        baseConfig.copy(srcList = Seq(new URI("file:."))).validateSrc should equal(Some("Error validating src: file:. is not absolute"))
+        baseConfig.copy(srcList = Seq(new URI("wrongscheme:///"))).validateSrc should equal(Some("Error validating src: scheme must be either 'file' or 'hdfs'"))
+        baseConfig.copy(srcList = Seq(new URI("file:/this/is/a/non/existent/path"))).validateSrc should equal(Some("Error validating src: file:/this/is/a/non/existent/path does not exist"))
 
         // Valid cases
-        baseConfig.copy(src = tmpSrcFile1).validateSrc should equal(None)
-        baseConfig.copy(src = tmpSrc).validateSrc should equal(None)
-        baseConfig.copy(src = new URI(s"$tmpSrc/")).validateSrc should equal(None)
-        baseConfig.copy(src = new URI(s"$tmpSrc/*")).validateSrc should equal(None)
+        baseConfig.copy(srcList = Seq(tmpSrcFile1)).validateSrc should equal(None)
+        baseConfig.copy(srcList = Seq(tmpSrc)).validateSrc should equal(None)
+        baseConfig.copy(srcList = Seq(new URI(s"$tmpSrc/"))).validateSrc should equal(None)
+        baseConfig.copy(srcList = Seq(new URI(s"$tmpSrc/*"))).validateSrc should equal(None)
     }
 
     it should "validate dst URI" in {

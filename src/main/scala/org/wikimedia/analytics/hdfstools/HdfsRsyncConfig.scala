@@ -34,7 +34,7 @@ import org.apache.log4j.{Appender, Level}
  */
 case class HdfsRsyncConfig(
     // Arguments
-    src: URI = new URI(""),
+    srcList: Seq[URI] = Seq.empty[URI],
     dst: Option[URI] = None,
     // Options
     dryRun: Boolean = false,
@@ -52,7 +52,7 @@ case class HdfsRsyncConfig(
 
     // Internal (need to be initialized)
     srcFs: FileSystem = null,
-    srcPath: Path = null,
+    srcPathList: Seq[Path] = Seq.empty[Path],
     dstFs: FileSystem = null,
     dstPath: Path = null,
     chmodFiles: Option[ChmodParser] = None,
@@ -140,7 +140,21 @@ case class HdfsRsyncConfig(
      * Patterns with special characters not matching any file return an empty list.
      * @return None if validation succeeds, Some(error-message) otherwise.
      */
-    def validateSrc: Option[String] = validateURI(src, isSrc = true)
+    def validateSrc: Option[String] = {
+        val sameSchemeError = {
+            if (srcList.tail.forall(src => src.getScheme == srcList.head.getScheme)) None
+            else Some("Error validating src list: not all src have same scheme")
+        }
+        val errors = srcList.map(src => validateURI(src, isSrc = true)) :+ sameSchemeError
+
+        errors.foldLeft(None.asInstanceOf[Option[String]])((acc, err) => {
+            if (err.isEmpty) acc
+            else if (acc.isEmpty) err
+            else Some(s"${acc.get}\n${err.get}")
+        })
+
+
+    }
 
     /**
      * Validate dst - should be a valid URI for an existing directory
@@ -321,9 +335,13 @@ case class HdfsRsyncConfig(
         filterRule match {
             case filterRulePattern(rawType, rawModifiers, rawPattern) =>
                 val anchoredToRoot = rawPattern.startsWith("/")
+                val fullPathCheck = rawPattern.dropRight(1).contains('/') || rawPattern.contains("**")
+                val forceFullPathCheck = rawModifiers.contains('/')
+
                 val updatedPattern = {
-                    // Adding wildcard before pattern to match relative path over full-path
-                    if (!anchoredToRoot) {
+                    // Adding wildcard before pattern to match relative path over
+                    // full-path when necessary
+                    if (fullPathCheck && !anchoredToRoot) {
                         s"glob:**$rawPattern"
                     } else {
                         s"glob:$rawPattern"
@@ -335,8 +353,8 @@ case class HdfsRsyncConfig(
                     ruleType = if (rawType == "+") Include() else Exclude(),
                     pattern = pattern,
                     oppositeMatch = rawModifiers.contains('!'),
-                    fullPathCheck = rawPattern.dropRight(1).contains('/') || rawPattern.contains("**"),
-                    forceFullPathCheck = rawModifiers.contains('/'),
+                    fullPathCheck = fullPathCheck || forceFullPathCheck,
+                    forceFullPathCheck = forceFullPathCheck,
                     anchoredToRoot = anchoredToRoot,
                     directoryOnly = rawPattern.endsWith("/")
                 )
@@ -353,9 +371,9 @@ case class HdfsRsyncConfig(
      */
     def initialize: HdfsRsyncConfig = {
         this.copy(
-            srcFs = getFS(src),
+            srcFs = getFS(srcList.head),
             // Add * to trailing slash to mimic rsync not copying src last folder but its content
-            srcPath = if (src.toString.endsWith("/")) new Path(s"$src/*") else new Path(src),
+            srcPathList = srcList.map(src => if (src.toString.endsWith("/")) new Path(s"$src/*") else new Path(src)),
 
             // Only initialize dstFS if dst is defined
             dstFs = dst.map(d => {
