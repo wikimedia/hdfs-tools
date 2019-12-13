@@ -5,7 +5,7 @@ import org.apache.hadoop.fs.{FileStatus, Path}
 
 class TestHdfsRsyncFilterRule extends TestHdfsRsyncHelper {
 
-    val config = baseConfig.copy(srcList = Seq(tmpSrc)).initialize
+    val config = baseConfig.copy(allURIs = Seq(tmpSrc)).initialize
 
     var statusFile1, statusFolder1, statusFolder1File2 = null.asInstanceOf[FileStatus]
 
@@ -96,5 +96,6 @@ class TestHdfsRsyncFilterRule extends TestHdfsRsyncHelper {
         filterRule.matches(statusFolder1, new Path(tmpSrc)) should equal(true)
         filterRule.matches(statusFolder1File2, new Path(tmpSrc)) should equal(false)
     }
+
 }
 

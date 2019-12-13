@@ -34,6 +34,9 @@ import org.apache.log4j.{Appender, Level}
  */
 case class HdfsRsyncConfig(
     // Arguments
+    // This value is a hack to overcome scopt limitation
+    // of having unbounded args as the last option.
+    allURIs: Seq[URI] = Seq.empty[URI],
     srcList: Seq[URI] = Seq.empty[URI],
     dst: Option[URI] = None,
     // Options
@@ -73,6 +76,25 @@ case class HdfsRsyncConfig(
     // Group 2: Modifiers (! is NOT MATCHING, / means checked against absolute pathname)
     // Group 3: actual pattern
     private val filterRulePattern = "^([+-])(!?/?|/!) ([^ ].*)$".r
+
+    /**
+     * Function providing srcList from allURIs (scopt hack)
+     * @return the n-1 first elements of allURIs if it contains more than one element,
+     *         allURIs otherwise.
+     */
+    private def getSrcList: Seq[URI] = {
+        if (allURIs.size > 1) allURIs.dropRight(1) else allURIs
+    }
+
+    /**
+     * Function providing dst from allURIs (scopt hack)
+     * @return the last element of allURIs is it contains more than one element,
+     *         None otherwise
+     */
+    private def getDst: Option[URI] = {
+        if (allURIs.size > 1) Some(allURIs.last) else None
+    }
+
 
     /**
      * Get either local or hadoop filesystem for the given URI
@@ -115,10 +137,9 @@ case class HdfsRsyncConfig(
      * @return None if validation succeeds, Some(error-message) otherwise.
      */
     private def validateURI(uri: URI, isSrc: Boolean): Option[String] = {
-        val paramName = if (isSrc) "src" else "dst"
         try {
-            if (uri.getScheme == null || uri.getScheme.isEmpty) Some(s"Error validating $paramName: $uri does not specify scheme")
-            else if (uri.getPath == null || !uri.getPath.startsWith("/")) Some(s"Error validating $paramName: $uri is not absolute")
+            if (uri.getScheme == null || uri.getScheme.isEmpty) Some(s"$uri does not specify scheme")
+            else if (uri.getPath == null || !uri.getPath.startsWith("/")) Some(s"$uri is not absolute")
             else {
                 val fs = getFS(uri)
                 val path = new Path(uri)
@@ -126,44 +147,47 @@ case class HdfsRsyncConfig(
                 val globResult = fs.globStatus(path)
                 if (globResult != null)
                     if (isSrc || fs.isDirectory(path)) None
-                    else Some(s"Error validating $paramName: $uri is not a directory")
-                else Some(s"Error validating $paramName: $uri does not exist")
+                    else Some(s"$uri is not a directory")
+                else Some(s"$uri does not exist")
             }
         } catch {
-            case e: IOException => Some(s"Error validating $paramName: ${e.getMessage}")
+            case e: IOException => Some(s"${e.getMessage}")
         }
     }
 
     /**
-     * Validate src - should be a valid URI for a glob pattern returning non-null result
+     * Validate srcList - They should all be a valid URIs of glob patterns returning non-null result.
+     * They also all should have the same scheme.
+     *
      * Note: Globs returning null are patterns without special characters not matching any file.
-     * Patterns with special characters not matching any file return an empty list.
+     *       Patterns with special characters not matching any file return an empty list.
+     *
      * @return None if validation succeeds, Some(error-message) otherwise.
      */
-    def validateSrc: Option[String] = {
-
+    def validateSrcList: Option[String] = {
+        val srcList = getSrcList
         val sameSchemeError = {
-            if (srcList.tail.forall(src => src.getScheme == srcList.head.getScheme)) None
-            else Some("Error validating src list: not all src have same scheme")
+            if (srcList.tail.forall(src => src.getScheme == srcList.head.getScheme)) {
+                None
+            } else {
+                Some("not all src have same scheme")
+            }
         }
-        val errors = srcList.map(src => validateURI(src, isSrc = true)) :+ sameSchemeError
+        val errors = srcList.flatMap(src => validateURI(src, isSrc = true)) ++ sameSchemeError.toSeq
 
-        errors.foldLeft(None.asInstanceOf[Option[String]])((acc, err) => {
-            if (err.isEmpty) acc
-            else if (acc.isEmpty) err
-            else Some(s"${acc.get}\n${err.get}")
-        })
-
-
+        prepareErrorMessage(errors, "Error validating src list:")
     }
 
     /**
      * Validate dst - should be a valid URI for an existing directory
+     *
      * @return None if validation succeeds, Some(error-message) otherwise.
      */
     def validateDst: Option[String] = {
         // As dst is an option we apply validation only if it is defined and succeed otherwise
-        dst.map(dstVal => validateURI(dstVal, isSrc = false)).getOrElse(None)
+        val dst = getDst
+        val errors = dst.flatMap(dstVal => validateURI(dstVal, isSrc = false)).toSeq
+        prepareErrorMessage(errors, "Error validating dst:")
     }
 
     /**
@@ -271,7 +295,7 @@ case class HdfsRsyncConfig(
      */
     def validate: Option[String] = {
         Seq(
-            validateSrc,
+            validateSrcList,
             validateDst,
             validateChmods,
             validateFilterRules,
@@ -371,22 +395,22 @@ case class HdfsRsyncConfig(
      * @return a new config with initialized values
      */
     def initialize: HdfsRsyncConfig = {
-        val srcL = if (srcList.size > 1) srcList.dropRight(1) else srcList
-        val dstL = if (srcList.size > 1) Some(srcList.last) else None
+        val srcList = getSrcList
+        val dst = getDst
         this.copy(
-            srcList = srcL,
-            srcFs = getFS(srcL.head),
+            srcList = srcList,
+            srcFs = getFS(srcList.head),
             // Add * to trailing slash to mimic rsync not copying src last folder but its content
-            srcPathList = srcL.map(src => if (src.toString.endsWith("/")) new Path(s"$src/*") else new Path(src)),
+            srcPathList = srcList.map(src => if (src.toString.endsWith("/")) new Path(s"$src/*") else new Path(src)),
 
-            dst = dstL,
+            dst = dst,
             // Only initialize dstFS if dst is defined
-            dstFs = dstL.map(d => {
+            dstFs = dst.map(d => {
                 val fs = getFS(d)
                 fs.setWriteChecksum(false)
                 fs
             }).orNull,
-            dstPath = dstL.map(d => new Path(d)).orNull,
+            dstPath = dst.map(d => new Path(d)).orNull,
 
             // It's important to use a negative match of inversePrefix here as we want to keep both
             // prefixed commands and not-prefixed commands applying to both.

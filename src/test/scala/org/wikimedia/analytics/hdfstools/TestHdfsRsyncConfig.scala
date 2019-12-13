@@ -7,23 +7,23 @@ class TestHdfsRsyncConfig extends TestHdfsRsyncHelper {
 
     "HdfsRsyncConfig" should "validate src URI" in {
         // Invalid cases
-        baseConfig.copy(srcList = Seq(new URI("/no/scheme/uri"))).validateSrc should equal(Some("Error validating src: /no/scheme/uri does not specify scheme"))
-        baseConfig.copy(srcList = Seq(new URI("file:."))).validateSrc should equal(Some("Error validating src: file:. is not absolute"))
-        baseConfig.copy(srcList = Seq(new URI("wrongscheme:///"))).validateSrc should equal(Some("Error validating src: scheme must be either 'file' or 'hdfs'"))
-        baseConfig.copy(srcList = Seq(new URI("file:/this/is/a/non/existent/path"))).validateSrc should equal(Some("Error validating src: file:/this/is/a/non/existent/path does not exist"))
+        baseConfig.copy(allURIs = Seq(new URI("/no/scheme/uri"))).validateSrcList should equal(Some("Error validating src list:\n\t/no/scheme/uri does not specify scheme"))
+        baseConfig.copy(allURIs = Seq(new URI("file:."))).validateSrcList should equal(Some("Error validating src list:\n\tfile:. is not absolute"))
+        baseConfig.copy(allURIs = Seq(new URI("wrongscheme:///"))).validateSrcList should equal(Some("Error validating src list:\n\tscheme must be either 'file' or 'hdfs'"))
+        baseConfig.copy(allURIs = Seq(new URI("file:/this/is/a/non/existent/path"))).validateSrcList should equal(Some("Error validating src list:\n\tfile:/this/is/a/non/existent/path does not exist"))
 
         // Valid cases
-        baseConfig.copy(srcList = Seq(tmpSrcFile1)).validateSrc should equal(None)
-        baseConfig.copy(srcList = Seq(tmpSrc)).validateSrc should equal(None)
-        baseConfig.copy(srcList = Seq(new URI(s"$tmpSrc/"))).validateSrc should equal(None)
-        baseConfig.copy(srcList = Seq(new URI(s"$tmpSrc/*"))).validateSrc should equal(None)
+        baseConfig.copy(allURIs = Seq(tmpSrcFile1)).validateSrcList should equal(None)
+        baseConfig.copy(allURIs = Seq(tmpSrc)).validateSrcList should equal(None)
+        baseConfig.copy(allURIs = Seq(new URI(s"$tmpSrc/"))).validateSrcList should equal(None)
+        baseConfig.copy(allURIs = Seq(new URI(s"$tmpSrc/*"))).validateSrcList should equal(None)
     }
 
     it should "validate dst URI" in {
         // Invalid case (folder doesn't exist)
-        baseConfig.copy(dst = Some(tmpSrcFile1)).validateDst should equal(Some(s"Error validating dst: $tmpSrcFile1 is not a directory"))
+        baseConfig.copy(allURIs = Seq(tmpSrcFile1, tmpSrcFile1)).validateDst should equal(Some(s"Error validating dst:\n\t$tmpSrcFile1 is not a directory"))
         // Valid case
-        baseConfig.copy(dst = Some(tmpSrc)).validateDst should equal(None)
+        baseConfig.copy(allURIs = Seq(tmpSrcFile1, tmpSrc)).validateDst should equal(None)
     }
 
     it should "validate chmod commands" in {

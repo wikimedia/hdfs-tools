@@ -28,7 +28,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
 
     "HdfsRsyncExec" should "log files to be copied without dst recursively" in {
         val config = baseConfig.copy(
-            srcList = Seq(tmpSrc),
+            allURIs = Seq(tmpSrc),
             recurse = true
         ).initialize
         new HdfsRsyncExec(config).apply()
@@ -44,7 +44,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
 
     it should "log files to be copied without dst recursively with trailing slash" in {
         val config = baseConfig.copy(
-            srcList = Seq(new URI(s"$tmpSrc/")),
+            allURIs = Seq(new URI(s"$tmpSrc/")),
             recurse = true,
             dryRun = true
         ).initialize
@@ -62,7 +62,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
 
     it should "log actions in dryrun mode recursively" in {
         val config = baseConfig.copy(
-            srcList = Seq(tmpSrc, tmpDstBase),
+            allURIs = Seq(tmpSrc, tmpDstBase),
             recurse = true,
             dryRun = true
         ).initialize
@@ -85,7 +85,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
 
     it should "copy src to dst with trailing slash (files only)" in {
         val config = baseConfig.copy(
-            srcList = Seq(new URI(s"$tmpSrc/"), tmpDstBase)
+            allURIs = Seq(new URI(s"$tmpSrc/"), tmpDstBase)
         ).initialize
         new HdfsRsyncExec(config).apply()
 
@@ -96,7 +96,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
 
     it should "copy src to dst recursively with size-only and not copy existing" in {
         val config = baseConfig.copy(
-            srcList = Seq(tmpSrc, tmpDstBase),
+            allURIs = Seq(tmpSrc, tmpDstBase),
             recurse = true,
             sizeOnly = true,
             logLevel = Level.DEBUG // Skipping messages are logged in debug mode
@@ -120,7 +120,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
 
     it should "copy src to dst updating modification timestamp" in {
         val config = baseConfig.copy(
-            srcList = Seq(tmpSrc, tmpDstBase),
+            allURIs = Seq(tmpSrc, tmpDstBase),
             preserveTimes = true,
             recurse = true
         ).initialize
@@ -136,7 +136,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
 
     it should "copy src to dst recursively 2 times with ignore-times and preserve-times" in {
         val config = baseConfig.copy(
-            srcList = Seq(tmpSrc,tmpDstBase),
+            allURIs = Seq(tmpSrc,tmpDstBase),
             recurse = true,
             preserveTimes = true,
             ignoreTimes = true,
@@ -163,7 +163,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
         testFile.exists() should equal(true)
 
         val config = baseConfig.copy(
-            srcList = Seq(tmpSrc, tmpDstBase),
+            allURIs = Seq(tmpSrc, tmpDstBase),
             recurse = true,
             deleteExtraneous = true
         ).initialize
@@ -182,7 +182,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
         Files.setPosixFilePermissions(testFilePath, PosixFilePermissions.fromString(testPerms1))
 
         val config = baseConfig.copy(
-            srcList = Seq(tmpSrc, tmpDstBase),
+            allURIs = Seq(tmpSrc, tmpDstBase),
             recurse = true,
             preservePerms = true,
             preserveTimes = true,
@@ -214,7 +214,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
     it should "copy src to dst recursively with time updating perms with chmod (to new files only)" in {
 
         val config = baseConfig.copy(
-            srcList = Seq(tmpSrc, tmpDstBase),
+            allURIs = Seq(tmpSrc, tmpDstBase),
             recurse = true,
             preserveTimes = true,
             chmodCommands = Seq("F600", "D750")
@@ -232,7 +232,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
         // Drop copied file to copy it again with new chmod perms
         new File(tmpDstFolder1File2).delete()
 
-        val newConfig = config.copy(srcList = Seq(tmpSrc, tmpDstBase), chmodCommands = Seq("F640")).initialize
+        val newConfig = config.copy(allURIs = Seq(tmpSrc, tmpDstBase), chmodCommands = Seq("F640")).initialize
         new HdfsRsyncExec(newConfig).apply()
 
         // Checking chmod has been applied to new file only
@@ -251,7 +251,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
     it should "copy src to dst recursively with time updating perms with chmod (to old files as well)" in {
 
         val config = baseConfig.copy(
-            srcList = Seq(tmpSrc, tmpDstBase),
+            allURIs = Seq(tmpSrc, tmpDstBase),
             recurse = true,
             preserveTimes = true,
             preservePerms = true,
@@ -271,7 +271,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
         new File(tmpDstFolder1File2).delete()
 
         // Checking chmod has been applied to all files including existing ones
-        val newConfig = config.copy(srcList = Seq(tmpSrc, tmpDstBase), chmodCommands = Seq("F640", "D700")).initialize
+        val newConfig = config.copy(allURIs = Seq(tmpSrc, tmpDstBase), chmodCommands = Seq("F640", "D700")).initialize
         new HdfsRsyncExec(newConfig).apply()
 
         // Not checking simple copy, going aight for file permissions
@@ -297,7 +297,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
         testFile.exists() should equal(true)
 
         val config = baseConfig.copy(
-            srcList = Seq(tmpSrc, tmpDstBase),
+            allURIs = Seq(tmpSrc, tmpDstBase),
             recurse = true,
             deleteExtraneous = true,
             filterRules = Seq("- folder_to_delete"),
@@ -315,7 +315,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
 
     it should "copy src to dst recursively except excluded" in {
         val config = baseConfig.copy(
-            srcList = Seq(tmpSrc, tmpDstBase),
+            allURIs = Seq(tmpSrc, tmpDstBase),
             recurse = true,
             sizeOnly = true,
             filterRules = Seq("- file*"),
@@ -333,7 +333,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
         val messages1 = testLogAppender.logEvents.map(_.getMessage.toString)
         messages1.count(_.startsWith("EXCLUDE_")) should equal(2)
 
-        val config2 = config.copy(srcList = Seq(tmpSrc, tmpDstBase), filterRules = Seq("- file_1")).initialize
+        val config2 = config.copy(allURIs = Seq(tmpSrc, tmpDstBase), filterRules = Seq("- file_1")).initialize
         testLogAppender.reset()
         new HdfsRsyncExec(config2).apply()
 
