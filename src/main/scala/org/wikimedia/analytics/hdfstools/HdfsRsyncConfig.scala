@@ -21,7 +21,7 @@ import java.nio.file.FileSystems
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.permission.ChmodParser
 import org.apache.hadoop.fs.{FileSystem, Path}
-import org.apache.log4j.{Appender, Level}
+import org.apache.log4j._
 
 import scala.util.Try
 
@@ -41,19 +41,36 @@ case class HdfsRsyncConfig(
     allURIs: Seq[URI] = Seq.empty[URI],
     srcsList: Seq[URI] = Seq.empty[URI],
     dst: Option[URI] = None,
+
     // Options
     dryRun: Boolean = false,
+    rootLogLevel: Level = Level.ERROR,
+    applicationLogLevel: Level = Level.INFO,
+    logFile: Option[String] = None,
+
     recurse: Boolean = false,
-    preservePerms: Boolean = false,
-    preserveTimes: Boolean = false,
-    deleteExtraneous: Boolean = false,
-    deleteExcluded: Boolean = false,
-    acceptedTimesDiffMs: Long = 1000,
+    copyDirs: Boolean = false,
+
+    resolveConflicts: Boolean = false,
+    useMostRecentModifTimes: Boolean = false,
+
+    existing: Boolean = false,
+    ignoreExisting: Boolean = false,
+    update: Boolean = false,
+
     ignoreTimes: Boolean = false,
     sizeOnly: Boolean = false,
-    filterRules: Seq[String] = Seq.empty[String],
+    acceptedTimesDiffMs: Long = 1000,
+
+    preservePerms: Boolean = false,
+    preserveTimes: Boolean = false,
     chmodCommands: Seq[String] = Seq.empty[String],
-    logLevel: Level = Level.INFO,
+
+    deleteExtraneous: Boolean = false,
+    deleteExcluded: Boolean = false,
+
+    filterRules: Seq[String] = Seq.empty[String],
+
 
     // Internal (need to be initialized)
     srcFs: FileSystem = null,
@@ -78,6 +95,30 @@ case class HdfsRsyncConfig(
     // Group 2: Modifiers (! is NOT MATCHING, / means checked against absolute pathname)
     // Group 3: actual pattern
     private val filterRulePattern = "^([+-])(!?/?|/!) ([^ ].*)$".r
+
+    //val loggerName = "org.wikimedia.analytics.hdfstools.hdfs"
+
+    // Pattern used for logging
+    private val loggingPattern = new PatternLayout("%d{yyyy-MM-dd'T'HH:mm:ss.SSS} %p %c{1} %m%n")
+
+    /**
+     * This function configures logging on root and package logger.
+     *  - Set logging level for root logger
+     *  - Configure appenders:
+     *    - If no logAppender nor logFile, use consoleAppender
+     *    - If no logAppender and logFile, use RollingFileAppender
+     *    - If logAppender, use them
+     */
+    private def configureLogging(): Unit = {
+        val rootLogger = Logger.getRootLogger
+        rootLogger.setLevel (rootLogLevel)
+
+        // Configure appenders on root logger
+        rootLogger.removeAllAppenders ()
+        val consoleLogAppender = if (logAppender.isEmpty) Some(new ConsoleAppender(loggingPattern, ConsoleAppender.SYSTEM_OUT)) else None
+        val logFileAppender = logFile.map(new RollingFileAppender(loggingPattern, _))
+        (logAppender ++ consoleLogAppender ++ logFileAppender).foreach (appender => rootLogger.addAppender (appender) )
+    }
 
     /**
      * Function providing srcList from allURIs (scopt hack)
@@ -120,7 +161,7 @@ case class HdfsRsyncConfig(
         if (errorMessages.isEmpty) {
             None
         } else {
-            Some(s"$errorMessageHeader\n${errorMessages.map(s => s"\t$s").mkString("\n")}")
+            Some(s"$errorMessageHeader\n${errorMessages.map(s => s"\t\t$s").mkString("\n")}")
         }
     }
 
@@ -272,12 +313,14 @@ case class HdfsRsyncConfig(
      * This function validates that some boolean options are (or not) called simultaneously:
      *  - sizeOnly and ignoreTimes shouldn't be set simultaneously
      *  - delete-excluded should only be set in conjunction with delete
+     *  - recurse and copyDirs shouldn't be set simultaneously
      * @return None if validation succeeds, Some(error-message) otherwise.
      */
     def validateFlags: Option[String] = {
         val errorMessages = {
-            (if (ignoreTimes && sizeOnly) Seq("skip-times and use size-only can't be used simultaneously") else Nil) ++
-                (if (deleteExcluded && !deleteExtraneous) Seq("delete-excluded must be used in conjunction with delete") else Nil)
+            (if (ignoreTimes && sizeOnly) Seq("skip-times and use size-only cannot be used simultaneously") else Nil) ++
+                (if (deleteExcluded && !deleteExtraneous) Seq("delete-excluded must be used in conjunction with delete") else Nil) ++
+                (if (recurse && copyDirs) Seq("recurse and dirs cannot be used simultaneously") else Nil)
         }
 
         prepareErrorMessage(errorMessages, "Error validating flags:")
@@ -397,6 +440,8 @@ case class HdfsRsyncConfig(
      * @return a new config with initialized values
      */
     def initialize: HdfsRsyncConfig = {
+        configureLogging()
+
         val srcsList = getSrcsList // scopt hack, see [[getSrcsList]]
         val dst = getDst           // scopt hack, see [[getDst]]
         this.copy(
@@ -422,6 +467,7 @@ case class HdfsRsyncConfig(
             chmodDirs = getChmodParser(chmodCommands.filter(!_.startsWith("F"))),
 
             parsedFilterRules = filterRules.map(getParsedFilterRule)
+
         )
     }
 }

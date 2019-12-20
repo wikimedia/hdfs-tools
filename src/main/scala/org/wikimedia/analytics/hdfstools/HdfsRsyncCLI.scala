@@ -21,6 +21,13 @@ import scopt.OptionParser
 
 object HdfsRsyncCLI {
 
+    sealed trait CLIFilterRuleType
+    case class CLIIncludeRule(pattern: String) extends CLIFilterRuleType
+    case class CLIExcludeRule(pattern: String) extends CLIFilterRuleType
+    case class CLIFilterRule(rule: String) extends CLIFilterRuleType
+    case class CLIIncludeFile(path: String) extends CLIFilterRuleType
+    case class CLIExcludeFile(rule: String) extends CLIFilterRuleType
+
     /**
      * Command line options parser
      */
@@ -37,6 +44,11 @@ object HdfsRsyncCLI {
               |
               |Note: a trailing slash in src (as in /example/src/) is changed to a pattern matching only the
               |      directory content (as in /example/src/*) mimicking standard rsync behavior.
+              |
+              |Note: The behavior of standard rsync when there are multiple sources and colliding folders or
+              |      files is to use the first-source values, for directories permissions and time-modifications
+              |      as their content is merged, and for files content and metadata. When collision occur on files
+              |      and folders, instead of keeping folders we raise an exception.
               |
               |Syntax for filter/include/exclude rules is similar to the standard rsync one:
               | * One rule per command-line option.
@@ -76,43 +88,89 @@ object HdfsRsyncCLI {
 
         opt[Unit]('v', "verbose")
             .optional()
-            .action((_, c) => c.copy(logLevel = Level.DEBUG))
-            .text("Add verbosity to logging (DEBUG)")
+            .action((_, c) => c.copy(applicationLogLevel = Level.DEBUG))
+            .text("Add verbosity to application logging (DEBUG)")
 
         opt[Unit]('q', "quiet")
             .optional()
-            .action((_, c) => c.copy(logLevel = Level.WARN))
-            .text("Remove verbosity from logging (WARN)")
+            .action((_, c) => c.copy(applicationLogLevel = Level.WARN))
+            .text("Remove verbosity from application logging (WARN)")
+
+        opt[Unit]("all-logs-info")
+            .optional()
+            .action((_, c) => c.copy(rootLogLevel = Level.INFO))
+            .text("Set root logger level to INFO (default: ERROR)")
+
+        opt[Unit]("all-logs-debug")
+            .optional()
+            .action((_, c) => c.copy(rootLogLevel = Level.DEBUG))
+            .text("Set root logger level to DEBUG (default: ERROR)")
+
+        opt[String]("log-file")
+            .optional()
+            .action((x, c) => c.copy(logFile = Some(x)))
+            .text("File to write logs instead of sending them to stdout")
+
+
 
         opt[Unit]('r', "recursive")
             .optional()
             .action((_, c) => c.copy(recurse = true))
             .text("Recurse into directories (default: false)")
 
-        opt[Unit]('p', "perms")
+        opt[Unit]('d', "dirs")
             .optional()
-            .action((_, c) => c.copy(preservePerms = true))
-            .text("Preserve permissions (default: false)")
+            .action((_, c) => c.copy(copyDirs = true))
+            .text("Copy directories without recursion (default: false)")
 
-        opt[Unit]('t', "times")
-            .optional()
-            .action((_, c) => c.copy(preserveTimes = true))
-            .text("Preserve modification times (default: false)")
 
-        opt[Long]("times-diff")
+
+        opt[Unit]("resolve-conflicts")
             .optional()
-            .action((x, c) => c.copy(acceptedTimesDiffMs = x))
-            .text("Milliseconds by which modificationTimes can differ and still be considered equal (default: 1000)")
+            .action((_, c) => c.copy(resolveConflicts = true))
+            .text("Resolve multi-source files/directories conflicts (default: false)\n" +
+                "\t\tNote: times and perms conflicts of merged-folders are resolved by default using the defined strategy.")
+
+        opt[Unit]("use-most-recent-time")
+            .optional()
+            .action((_, c) => c.copy(useMostRecentModifTimes = true))
+            .text("Use most recent modificationTime object instead of first listed src in conflicts (default: false)")
+
+
+
+        opt[Unit]("existing")
+            .optional()
+            .action((_, c) => c.copy(existing = false))
+            .text("Skip creating new files in dst (default: false)")
+
+        opt[Unit]("ignore-existing")
+            .optional()
+            .action((_, c) => c.copy(ignoreExisting = false))
+            .text("skip updating files that exist in dst (default: false)")
+
+        opt[Unit]('u', "update")
+            .optional()
+            .action((_, c) => c.copy(update = false))
+            .text("Skip files that are newer in dst (default: false)")
+
+
 
         opt[Unit]("size-only")
             .optional()
             .action((_, c) => c.copy(sizeOnly = true))
             .text("Skip files that match in size (default: false)")
 
+        opt[Long]("times-diff")
+            .optional()
+            .action((x, c) => c.copy(acceptedTimesDiffMs = x))
+            .text("Milliseconds by which modificationTimes can differ and still be considered equal (default: 1000)")
+
         opt[Unit]('I', "ignore-times")
             .optional()
             .action((_, c) => c.copy(ignoreTimes = true))
             .text("Don't skip files that match size and time (default: false)")
+
+
 
         opt[Unit]("delete")
             .optional()
@@ -124,6 +182,18 @@ object HdfsRsyncCLI {
             .action((_, c) => c.copy(deleteExcluded = true))
             .text("Delete extraneous files from dst dirs even if present in exclude rule (default: false)")
 
+
+
+        opt[Unit]('p', "perms")
+            .optional()
+            .action((_, c) => c.copy(preservePerms = true))
+            .text("Preserve permissions (default: false)")
+
+        opt[Unit]('t', "times")
+            .optional()
+            .action((_, c) => c.copy(preserveTimes = true))
+            .text("Preserve modification times (default: false)")
+
         opt[Seq[String]]("chmod")
             .optional()
             .unbounded()
@@ -131,6 +201,8 @@ object HdfsRsyncCLI {
                 c.copy(chmodCommands = c.chmodCommands ++ x.map(_.trim))
             })
             .text("affect file and/or directory permissions")
+
+
 
         opt[String]("filter")
             .optional()
@@ -150,6 +222,8 @@ object HdfsRsyncCLI {
             .action((x, c) => c.copy(filterRules = c.filterRules :+ s"- ${x.trim}"))
             .text("Add exclusion pattern (this is an alias for: --filter '- PATTERN')")
 
+
+
         // This is a hack to overcome scopt limitiation of having to put unbounded argument
         // as last option. We store all URIs in allURIs and the take the first n-1 ones for
         // srcList and the last one for dst.
@@ -157,6 +231,8 @@ object HdfsRsyncCLI {
             .unbounded()
             .action((x, c) => c.copy(allURIs = c.allURIs :+ x))
             .text("Fully qualified URI, one or more sources followed by zero or one destination")
+
+
 
         checkConfig(_.validate.map(Left(_)).getOrElse(Right(())))
 
