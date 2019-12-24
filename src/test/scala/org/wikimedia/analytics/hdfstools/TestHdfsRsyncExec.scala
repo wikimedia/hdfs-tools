@@ -2,8 +2,9 @@ package org.wikimedia.analytics.hdfstools
 
 import java.io.{PrintWriter, File}
 import java.net.URI
-import java.nio.file.attribute.{PosixFileAttributes, PosixFilePermissions}
-import java.nio.file.{Files, Paths}
+import java.nio.file.attribute._
+// Non necessary imports kept for commented tests at the bottom
+import java.nio.file.{LinkOption, FileSystems, Files, Paths}
 
 import org.apache.commons.io.FileUtils
 import org.apache.log4j.Level
@@ -183,6 +184,43 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
         messages.count(_.startsWith("SKIP_FILE")) should equal(1)
     }
 
+    it should "copy src to dst recursively and prune empty dirs" in {
+        // Delete file in folder_1 for it to be pruned
+        new File(tmpSrcFolder1File2).delete()
+        new File(tmpSrcFolder1File2).exists() should equal(false)
+
+        val config = baseConfig.copy(
+            allURIs = Seq(tmpSrc, tmpDstBase),
+            recurse = true,
+            pruneEmptyDirs = true,
+            applicationLogLevel = Level.DEBUG // Skipping messages are logged in debug mode
+        ).initialize
+        new HdfsRsyncExec(config).apply()
+
+        val innerList = new File(tmpDst).list()
+        innerList.size should equal(1)
+        innerList should contain("file_1")
+
+        val messages = testLogAppender.logEvents.map(_.getMessage.toString)
+        messages.count(_.startsWith("PRUNE_DIR")) should equal(1)
+    }
+
+    it should "copy src to dst updating modification timestamp" in {
+        val config = baseConfig.copy(
+            allURIs = Seq(tmpSrc, tmpDstBase),
+            preserveTimes = true,
+            recurse = true
+        ).initialize
+        new HdfsRsyncExec(config).apply()
+
+        val tmpContent = tmpDstBaseFile.list()
+        tmpContent.size should equal(1)
+        tmpContent.head should equal("test_folder")
+        val f = new File(tmpDst)
+        // Since we test on a single local filesystem, no precision problem
+        f.lastModified() should equal(new File(tmpSrc).lastModified())
+    }
+
     it should "copy src to dst recursively with times and update existing only on second copy" in {
         val config = baseConfig.copy(
             allURIs = Seq(tmpSrc, tmpDstBase),
@@ -209,22 +247,6 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
         // Existing file (folder) updated
         new File(tmpDstFolder1).lastModified should equal(new File(tmpSrcFolder1).lastModified)
         new File(tmpDstFolder1File2).lastModified should equal(new File(tmpSrcFolder1File2).lastModified)
-    }
-
-    it should "copy src to dst updating modification timestamp" in {
-        val config = baseConfig.copy(
-            allURIs = Seq(tmpSrc, tmpDstBase),
-            preserveTimes = true,
-            recurse = true
-        ).initialize
-        new HdfsRsyncExec(config).apply()
-
-        val tmpContent = tmpDstBaseFile.list()
-        tmpContent.size should equal(1)
-        tmpContent.head should equal("test_folder")
-        val f = new File(tmpDst)
-        // Since we test on a single local filesystem, no precision problem
-        f.lastModified() should equal(new File(tmpSrc).lastModified())
     }
 
     it should "copy src to dst recursively 2 times with ignore-times and preserve-times" in {
@@ -707,7 +729,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
         new File(tmpDstFile1).lastModified() should equal(new File(tmpSrcFile1).lastModified())
     }
 
-    it should "copy src and src2 recursively with times resolving conflict using most-recent-nodif-time when set" in {
+    it should "copy src and src2 recursively with times resolving conflict using most-recent-modif-time when set" in {
         // Create conflicting file in src2 with forced modif-time difference
         val conflictingFileURI = new URI(s"$tmpSrc2/file_1")
         new File(conflictingFileURI).createNewFile()
@@ -730,6 +752,189 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
 
         new File(tmpDstFile1).lastModified() should equal(new File(conflictingFileURI).lastModified())
     }
+
+    // Tests for usermap/groupmap and chown - Those are commented since they require special system
+    // configuration and root access to work:
+    //  * create user test_rsync with its own group:
+    //     'sudo useradd test_rsync'
+    //  * uncomment tests below
+    //  * run maven from root using local repo to prevent downloading dependency jars anew:
+    //      'sudo mvn -Dmaven.repo.local=/home/USERNAME/.m2/repository test'
+    //  * After the tests, don't forget to delete the target folder as it will be unaccessible
+    //    except from root
+    //      'sudo rm -r target'
+
+    /*
+    it should "copy src to dst recursively changing applying src ownership (user)" in {
+        val p = Paths.get(tmpSrcFile1)
+        val lookupService = FileSystems.getDefault.getUserPrincipalLookupService
+        val user = lookupService.lookupPrincipalByName("test_rsync")
+        Files.setOwner(p, user)
+
+        val config = baseConfig.copy(
+            allURIs = Seq(tmpSrc, tmpDstBase),
+            recurse = true,
+            preserveOwner = true
+        ).initialize
+        new HdfsRsyncExec(config).apply()
+        checkTmpDstContainsTmpSrc()
+
+        Seq(tmpDst, tmpDstFolder1, tmpDstFolder1File2).foreach(f => {
+            val attr = Files.readAttributes(Paths.get(f), classOf[PosixFileAttributes])
+            attr.owner().getName should equal("root")
+            attr.group().getName should equal("root")
+        })
+
+        val attr = Files.readAttributes(Paths.get(tmpDstFile1), classOf[PosixFileAttributes])
+        attr.owner().getName should equal("test_rsync")
+        attr.group().getName should equal("root")
+    }
+
+    it should "copy src to dst recursively changing applying src ownership (group)" in {
+        val p = Paths.get(tmpSrcFile1)
+        val lookupService = FileSystems.getDefault.getUserPrincipalLookupService
+        val group = lookupService.lookupPrincipalByGroupName("test_rsync")
+        Files.getFileAttributeView(p, classOf[PosixFileAttributeView], LinkOption.NOFOLLOW_LINKS).setGroup(group)
+
+        val config = baseConfig.copy(
+            allURIs = Seq(tmpSrc, tmpDstBase),
+            recurse = true,
+            preserveGroup = true
+        ).initialize
+        new HdfsRsyncExec(config).apply()
+        checkTmpDstContainsTmpSrc()
+
+        Seq(tmpDst, tmpDstFolder1, tmpDstFolder1File2).foreach(f => {
+            val attr = Files.readAttributes(Paths.get(f), classOf[PosixFileAttributes])
+            attr.owner().getName should equal("root")
+            attr.group().getName should equal("root")
+        })
+
+        val attr = Files.readAttributes(Paths.get(tmpDstFile1), classOf[PosixFileAttributes])
+        attr.owner().getName should equal("root")
+        attr.group().getName should equal("test_rsync")
+    }
+
+    it should "copy src to dst recursively changing applying src ownership (both)" in {
+        val p = Paths.get(tmpSrcFile1)
+        val lookupService = FileSystems.getDefault.getUserPrincipalLookupService
+        val user = lookupService.lookupPrincipalByName("test_rsync")
+        val group = lookupService.lookupPrincipalByGroupName("test_rsync")
+        Files.setOwner(p, user)
+        Files.getFileAttributeView(p, classOf[PosixFileAttributeView], LinkOption.NOFOLLOW_LINKS).setGroup(group)
+
+        val config = baseConfig.copy(
+            allURIs = Seq(tmpSrc, tmpDstBase),
+            recurse = true,
+            preserveOwner = true,
+            preserveGroup = true
+        ).initialize
+        new HdfsRsyncExec(config).apply()
+        checkTmpDstContainsTmpSrc()
+
+        Seq(tmpDst, tmpDstFolder1, tmpDstFolder1File2).foreach(f => {
+            val attr = Files.readAttributes(Paths.get(f), classOf[PosixFileAttributes])
+            attr.owner().getName should equal("root")
+            attr.group().getName should equal("root")
+        })
+
+        val attr = Files.readAttributes(Paths.get(tmpDstFile1), classOf[PosixFileAttributes])
+        attr.owner().getName should equal("test_rsync")
+        attr.group().getName should equal("test_rsync")
+    }
+
+    it should "copy src to dst recursively changing applying src chowned ownership (user)" in {
+
+        val config = baseConfig.copy(
+            allURIs = Seq(tmpSrc, tmpDstBase),
+            recurse = true,
+            preserveOwner = true,
+            chown = Some("test_rsync:test_rsync")
+        ).initialize
+        new HdfsRsyncExec(config).apply()
+        checkTmpDstContainsTmpSrc()
+
+        Seq(tmpDst, tmpDstFile1, tmpDstFolder1, tmpDstFolder1File2).foreach(f => {
+            val attr = Files.readAttributes(Paths.get(f), classOf[PosixFileAttributes])
+            attr.owner().getName should equal("test_rsync")
+            attr.group().getName should equal("root")
+        })
+    }
+
+    it should "copy src to dst recursively changing applying src chowned ownership (user 2)" in {
+
+        val config = baseConfig.copy(
+            allURIs = Seq(tmpSrc, tmpDstBase),
+            recurse = true,
+            preserveOwner = true,
+            preserveGroup = true,
+            chown = Some("test_rsync")
+        ).initialize
+        new HdfsRsyncExec(config).apply()
+        checkTmpDstContainsTmpSrc()
+
+        Seq(tmpDst, tmpDstFile1, tmpDstFolder1, tmpDstFolder1File2).foreach(f => {
+            val attr = Files.readAttributes(Paths.get(f), classOf[PosixFileAttributes])
+            attr.owner().getName should equal("test_rsync")
+            attr.group().getName should equal("root")
+        })
+    }
+
+    it should "copy src to dst recursively changing applying src chowned ownership (group)" in {
+
+        val config = baseConfig.copy(
+            allURIs = Seq(tmpSrc, tmpDstBase),
+            recurse = true,
+            preserveGroup = true,
+            chown = Some("test_rsync:test_rsync")
+        ).initialize
+        new HdfsRsyncExec(config).apply()
+        checkTmpDstContainsTmpSrc()
+
+        Seq(tmpDst, tmpDstFile1, tmpDstFolder1, tmpDstFolder1File2).foreach(f => {
+            val attr = Files.readAttributes(Paths.get(f), classOf[PosixFileAttributes])
+            attr.owner().getName should equal("root")
+            attr.group().getName should equal("test_rsync")
+        })
+    }
+
+    it should "copy src to dst recursively changing applying src chowned ownership (group 2)" in {
+        val config = baseConfig.copy(
+            allURIs = Seq(tmpSrc, tmpDstBase),
+            recurse = true,
+            preserveOwner = true,
+            preserveGroup = true,
+            chown = Some(":test_rsync")
+        ).initialize
+        new HdfsRsyncExec(config).apply()
+        checkTmpDstContainsTmpSrc()
+
+        Seq(tmpDst, tmpDstFile1, tmpDstFolder1, tmpDstFolder1File2).foreach(f => {
+            val attr = Files.readAttributes(Paths.get(f), classOf[PosixFileAttributes])
+            attr.owner().getName should equal("root")
+            attr.group().getName should equal("test_rsync")
+        })
+    }
+
+    it should "copy src to dst recursively changing applying src chowned ownership (both)" in {
+
+        val config = baseConfig.copy(
+            allURIs = Seq(tmpSrc, tmpDstBase),
+            recurse = true,
+            preserveOwner = true,
+            preserveGroup = true,
+            chown = Some("test_rsync:test_rsync")
+        ).initialize
+        new HdfsRsyncExec(config).apply()
+        checkTmpDstContainsTmpSrc()
+
+        Seq(tmpDst, tmpDstFile1, tmpDstFolder1, tmpDstFolder1File2).foreach(f => {
+            val attr = Files.readAttributes(Paths.get(f), classOf[PosixFileAttributes])
+            attr.owner().getName should equal("test_rsync")
+            attr.group().getName should equal("test_rsync")
+        })
+    }
+    */
 
 }
 

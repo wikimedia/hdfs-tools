@@ -24,6 +24,7 @@ import org.apache.hadoop.fs.{FileSystem, Path}
 import org.apache.log4j._
 
 import scala.util.Try
+import scala.util.matching.Regex
 
 
 /**
@@ -50,6 +51,7 @@ case class HdfsRsyncConfig(
 
     recurse: Boolean = false,
     copyDirs: Boolean = false,
+    pruneEmptyDirs: Boolean = false,
 
     resolveConflicts: Boolean = false,
     useMostRecentModifTimes: Boolean = false,
@@ -62,9 +64,16 @@ case class HdfsRsyncConfig(
     sizeOnly: Boolean = false,
     acceptedTimesDiffMs: Long = 1000,
 
-    preservePerms: Boolean = false,
     preserveTimes: Boolean = false,
+
+    preservePerms: Boolean = false,
     chmodCommands: Seq[String] = Seq.empty[String],
+
+    preserveOwner: Boolean = false,
+    usermap: Seq[String] = Seq.empty,
+    preserveGroup: Boolean = false,
+    groupmap: Seq[String] = Seq.empty,
+    chown: Option[String] = None,
 
     deleteExtraneous: Boolean = false,
     deleteExcluded: Boolean = false,
@@ -79,6 +88,8 @@ case class HdfsRsyncConfig(
     dstPath: Path = null,
     chmodFiles: Option[ChmodParser] = None,
     chmodDirs: Option[ChmodParser] = None,
+    parsedUsermap: Seq[(Regex, String)] = Seq.empty,
+    parsedGroupmap: Seq[(Regex, String)] = Seq.empty,
     parsedFilterRules: Seq[HdfsRsyncFilterRule] = Seq.empty[HdfsRsyncFilterRule],
     // Set hadoop-conf
     hadoopConf: Configuration = new Configuration(),
@@ -90,6 +101,11 @@ case class HdfsRsyncConfig(
     // https://github.com/apache/hadoop/blob/trunk/hadoop-common-project/hadoop-common/src/main/java/org/apache/hadoop/fs/permission/ChmodParser.java
     private val chmodOctalPattern = "^([FD]?)([01]?[0-7]{3})$".r
     private val chmodSymbolicPattern = "^([FD]?)([ugoa]{0,3}[+=-]{1}[rwxXt]{1,4})$".r
+
+    // Pattern extracted and modified from https://github.com/shadow-maint/shadow/blob/master/libmisc/chkname.c#L58
+    private val mappingPatternPattern = "^([a-z_]|\\*)([a-z0-9_-]|\\*)*(\\$)?$".r
+    private val mappingNamePattern = "^[a-z_][a-z0-9_-]*\\$?$".r
+    private val maxNameSize = 32
 
     // Group 1: Include/exclude
     // Group 2: Modifiers (! is NOT MATCHING, / means checked against absolute pathname)
@@ -290,6 +306,81 @@ case class HdfsRsyncConfig(
         prepareErrorMessage(errorMessages, "Error validating chmod commands:")
     }
 
+    def validateChown: Option[String] = {
+        val errorMessages = chown.map(chownValue => {
+            val parsingErrors = {
+                val parts = chownValue.split(":")
+                val partsNumber = parts.length
+                if (partsNumber == 1 || partsNumber == 2) {
+                    val username = parts(0)
+                    val usernameErrors = {
+                        if (username.length > 0) {
+                            (if (mappingNamePattern.findFirstIn(username).isEmpty) Seq(s"Invalid username: $username") else Nil) ++
+                                (if (username.length > maxNameSize) Seq(s"Invalid username size (max 32): $username") else Nil)
+                        } else {
+                            if (parts.length == 1) Seq(s"Invalid empty username") else Nil
+                        }
+                    }
+
+                    val groupnameErrors = {
+                        if (partsNumber == 2) {
+                            val groupname = parts(1)
+                            if (groupname.length > 0) {
+                                (if (mappingNamePattern.findFirstIn(groupname).isEmpty) Seq(s"Invalid groupname: $groupname") else Nil) ++
+                                    (if (groupname.length > maxNameSize) Seq(s"Invalid groupname size (max 32): $groupname") else Nil)
+                            } else {
+                                // No need to check for empty username as ":".split(":") returns emtpy array
+                                Nil
+                            }
+                        } else {
+                            Nil
+                        }
+                    }
+
+                    usernameErrors ++ groupnameErrors
+
+                } else {
+                    Seq(s"Invalid chown format: $chownValue")
+                }
+            }
+
+            (if (usermap.nonEmpty || groupmap.nonEmpty) Seq("chown and usermap/groupmap cannot be used simultaneously") else Nil) ++
+                parsingErrors
+
+        }).getOrElse(Seq.empty)
+
+        prepareErrorMessage(errorMessages, s"Error validating chown:")
+    }
+
+    /**
+     * Function validating a list of user or group mappings.
+     * Mappings should be in the format: 'pattern:value' where pattern will be matched against
+     * src username (only * is accepted as a wildcard and matches any character 0 or more times)
+     * and value is the new value that will be assigned if pattern matches.
+     *
+     * @param mappings the list of mappings to validate
+     * @param name the name of the parameter being checked (should be usermap or groupmap)
+     * @return None if validation succeeds, Some(error-message) otherwise.
+     */
+    def validateMapping(mappings: Seq[String], name: String): Option[String] = {
+
+        val errorMessages = mappings.flatMap(mapping => {
+            val parts = mapping.split(":")
+            if (parts.length == 2 && parts(0).nonEmpty && parts(1).nonEmpty) {
+                val pattern = parts(0)
+                val value = parts(1)
+                (if (mappingPatternPattern.findFirstIn(pattern).isEmpty) Seq(s"Invalid mapping pattern: $pattern") else Nil) ++
+                    (if (mappingNamePattern.findFirstIn(value).isEmpty) Seq(s"Invalid mapping value: $value") else Nil) ++
+                    (if (pattern.length > maxNameSize) Seq(s"Invalid mapping pattern size (max 32): $pattern") else Nil) ++
+                    (if (value.length > maxNameSize) Seq(s"Invalid mapping value size (max 32): $value") else Nil)
+            } else {
+                Seq(s"Invalid mapping format: $mapping")
+            }
+        })
+
+        prepareErrorMessage(errorMessages, s"Error validating $name:")
+    }
+
     /**
      * Validate the list of filter rules.
      *
@@ -343,6 +434,9 @@ case class HdfsRsyncConfig(
             validateSrcsList,
             validateDst,
             validateChmods,
+            validateChown,
+            validateMapping(usermap, "usermap"),
+            validateMapping(groupmap, "groupmap"),
             validateFilterRules,
             validateFlags
         ).fold(None)((accumulatedValidationResults, newValidationResult) => {
@@ -388,6 +482,33 @@ case class HdfsRsyncConfig(
             }
         })
         rebuiltString.map(new ChmodParser(_))
+    }
+
+    /**
+     * Function providing username/groupname mapping pattern value from chown
+     * @param idx either 0 for username or 1 for groupname mapping pattern
+     * @return None if no define chown or emtpy part, Some(pattern) otherwise
+     */
+    private def getChownPart(idx: Int): Option[String] = {
+        chown.flatMap(chownValue => {
+            val parts = chownValue.split(":")
+            if (idx < parts.length && parts(idx).length > 0) Some(s"*:${parts(idx)}") else None
+        })
+    }
+    private def getChownUsernamePattern: Option[String] = getChownPart(0)
+    private def getChownGroupnamePattern: Option[String] = getChownPart(1)
+
+
+    /**
+     * Parse a user/group mapping into a regex (* -> .*) and a value.
+     * Expected separator is ':'
+     * @param mapping the mapping to parse
+     * @return the parsed (regex, value) pair
+     */
+    def getParsedMapping(mapping: String): (Regex, String) = {
+        val parts = mapping.split(":")
+        val (pattern, value) = (parts(0), parts(1))
+        (new Regex(pattern.replaceAllLiterally("*", ".*")), value)
     }
 
     /**
@@ -465,6 +586,10 @@ case class HdfsRsyncConfig(
             // prefixed commands and not-prefixed commands applying to both.
             chmodFiles = getChmodParser(chmodCommands.filter(!_.startsWith("D"))),
             chmodDirs = getChmodParser(chmodCommands.filter(!_.startsWith("F"))),
+
+            // Use either usermap/groupmap or chown defined value (values are validated, this will work)
+            parsedUsermap = (usermap ++ getChownUsernamePattern).map(getParsedMapping),
+            parsedGroupmap = (groupmap ++ getChownGroupnamePattern).map(getParsedMapping),
 
             parsedFilterRules = filterRules.map(getParsedFilterRule)
 

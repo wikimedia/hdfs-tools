@@ -4,8 +4,8 @@ import java.io.File
 import java.net.URI
 
 import org.apache.commons.io.FileUtils
-import org.apache.log4j.AppenderSkeleton
 import org.apache.log4j.spi.LoggingEvent
+import org.apache.log4j.{AppenderSkeleton, ConsoleAppender}
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -28,12 +28,9 @@ trait TestHdfsRsyncHelper extends AnyFlatSpec with Matchers with BeforeAndAfterE
         def reset(): Unit = logEvents.clear()
     }
 
-    val testLogAppender = new TestLogAppender()
-
     val originalConfig = new HdfsRsyncConfig()
-    // To turn on console logging in tests, comment next line and uncomment the one after
-    val baseConfig = originalConfig.copy(logAppender = Seq(testLogAppender))
-    //val baseConfig = originalConfig.copy(logAppender = originalConfig.logAppender :+ testLogAppender)
+    val testLogAppender: TestLogAppender = new TestLogAppender()
+    val baseConfig: HdfsRsyncConfig = originalConfig.copy(logAppender = Seq(testLogAppender))
 
     val userTmp = "/tmp/" + System.getProperty("user.name")
     val testBaseURI = new URI(s"file:$userTmp/test_hdfs_rsync")
@@ -108,6 +105,7 @@ trait TestHdfsRsyncHelper extends AnyFlatSpec with Matchers with BeforeAndAfterE
         testLogAppender.reset()
 
         createTestFiles()
+
     }
      override def afterEach(): Unit = {
          deleteTestFiles()

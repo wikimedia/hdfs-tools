@@ -67,6 +67,59 @@ class TestHdfsRsyncConfig extends TestHdfsRsyncHelper {
                 "\t\tOnly one octal chmod command is allowed for dirs"))
     }
 
+    it should "validate chown commands" in {
+        // Some valid cases
+        baseConfig.copy(chown = Some("test_user:test_group")).validateChown should equal(None)
+        baseConfig.copy(chown = Some("test_user_only")).validateChown should equal(None)
+        baseConfig.copy(chown = Some(":test_group_only")).validateChown should equal(None)
+
+        // Some invalid formats
+        baseConfig.copy(chown = Some(":")).validateChown should
+            equal(Some("Error validating chown:\n\t\tInvalid chown format: :"))
+        baseConfig.copy(chown = Some("user:group:more")).validateChown should
+            equal(Some("Error validating chown:\n\t\tInvalid chown format: user:group:more"))
+        baseConfig.copy(chown = Some("wrong_*_user")).validateChown should
+            equal(Some("Error validating chown:\n\t\tInvalid username: wrong_*_user"))
+        baseConfig.copy(chown = Some(":wrong_*_group")).validateChown should
+            equal(Some("Error validating chown:\n\t\tInvalid groupname: wrong_*_group"))
+        baseConfig.copy(chown = Some("wrong_*_user:group_ok")).validateChown should
+            equal(Some("Error validating chown:\n\t\tInvalid username: wrong_*_user"))
+        baseConfig.copy(chown = Some("user_ok:wrong_*_group")).validateChown should
+            equal(Some("Error validating chown:\n\t\tInvalid groupname: wrong_*_group"))
+        baseConfig.copy(chown = Some("too_long_for_a_valid_linux_username")).validateChown should
+            equal(Some("Error validating chown:\n\t\tInvalid username size (max 32): too_long_for_a_valid_linux_username"))
+        baseConfig.copy(chown = Some("too_long_for_a_valid_linux_username:group")).validateChown should
+            equal(Some("Error validating chown:\n\t\tInvalid username size (max 32): too_long_for_a_valid_linux_username"))
+        baseConfig.copy(chown = Some(":too_long_for_a_valid_linux_groupname")).validateChown should
+            equal(Some("Error validating chown:\n\t\tInvalid groupname size (max 32): too_long_for_a_valid_linux_groupname"))
+        baseConfig.copy(chown = Some("user:too_long_for_a_valid_linux_groupname")).validateChown should
+            equal(Some("Error validating chown:\n\t\tInvalid groupname size (max 32): too_long_for_a_valid_linux_groupname"))
+        baseConfig.copy(chown = Some("too_long_for_a_valid_linux_username:too_long_for_a_valid_linux_groupname")).validateChown should
+            equal(Some("Error validating chown:\n\t\tInvalid username size (max 32): too_long_for_a_valid_linux_username\n" +
+                "\t\tInvalid groupname size (max 32): too_long_for_a_valid_linux_groupname"))
+    }
+
+    it should "validate mappings" in {
+        // Some valid cases
+        baseConfig.validateMapping(Seq("*:test"), "test") should equal(None)
+        baseConfig.validateMapping(Seq("*_test:test"), "test") should equal(None)
+        baseConfig.validateMapping(Seq("test:test"), "test") should equal(None)
+
+        // Some invalid formats
+        baseConfig.validateMapping(Seq(":test"), "test") should
+            equal(Some("Error validating test:\n\t\tInvalid mapping format: :test"))
+        baseConfig.validateMapping(Seq("test:"), "test") should
+            equal(Some("Error validating test:\n\t\tInvalid mapping format: test:"))
+        baseConfig.validateMapping(Seq("test?:test"), "test") should
+            equal(Some("Error validating test:\n\t\tInvalid mapping pattern: test?"))
+        baseConfig.validateMapping(Seq("test:test*"), "test") should
+            equal(Some("Error validating test:\n\t\tInvalid mapping value: test*"))
+        baseConfig.validateMapping(Seq("too_long_for_a_valid_linux_username:test"), "test") should
+            equal(Some("Error validating test:\n\t\tInvalid mapping pattern size (max 32): too_long_for_a_valid_linux_username"))
+        baseConfig.validateMapping(Seq("pattern:too_long_for_a_valid_linux_username"), "test") should
+            equal(Some("Error validating test:\n\t\tInvalid mapping value size (max 32): too_long_for_a_valid_linux_username"))
+    }
+
     it should "validate filter rules" in {
         // Some valid cases
         baseConfig.copy(filterRules = Seq("+ x")).validateFilterRules should equal(None)

@@ -19,5 +19,26 @@ class TestHdfsRsyncCLI extends TestHdfsRsyncHelper {
             case _ => fail()
         }
     }
+
+    it should "correctly load rules from file" in {
+        val rulesFilePath = this.getClass.getResource("/rules.txt").getPath
+        val args = Array(
+            "--filter-from-file", rulesFilePath,
+            "--exclude-from-file", rulesFilePath,
+            "--include-from-file", rulesFilePath,
+            tmpSrc.toString
+        )
+        HdfsRsyncCLI.argsParser.parse(args, HdfsRsyncConfig()) match {
+            case Some(configNotInitialized) =>
+                val filterRules = configNotInitialized.filterRules
+                filterRules.size should equal (3 * 5)
+                filterRules.count(r => r.startsWith("+ ")) should equal(5 + 3)
+                filterRules.count(r => r.startsWith("- ")) should equal(5 + 2)
+                filterRules.head should equal("+ this is")
+                filterRules.last should equal("+ + spaced empty lines")
+
+            case _ => fail()
+        }
+    }
 }
 

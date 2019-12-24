@@ -19,14 +19,37 @@ import java.net.URI
 import org.apache.log4j.Level
 import scopt.OptionParser
 
+import scala.io.Source
+
 object HdfsRsyncCLI {
 
-    sealed trait CLIFilterRuleType
-    case class CLIIncludeRule(pattern: String) extends CLIFilterRuleType
-    case class CLIExcludeRule(pattern: String) extends CLIFilterRuleType
-    case class CLIFilterRule(rule: String) extends CLIFilterRuleType
-    case class CLIIncludeFile(path: String) extends CLIFilterRuleType
-    case class CLIExcludeFile(rule: String) extends CLIFilterRuleType
+    /**
+     * Function loading filter rules from a file, one rule or pattern per line.
+     * Empty lines and lines starting with a # are discarded.
+     *
+     * @param filepath the path of the file to read
+     * @param config the config to update
+     * @param ruleTypeOpt the rule-type to add as header to the parsed line if any
+     * @return the updated config
+     */
+    private def loadFilterRulesFromFile(
+        filepath: String,
+        config: HdfsRsyncConfig,
+        ruleTypeOpt: Option[HdfsRsyncFilterRuleType] = None
+    ): HdfsRsyncConfig = config.copy(
+        filterRules = config.filterRules ++
+            Source.fromFile(filepath).getLines.flatMap(line => {
+                val trimmed = line.trim
+                if (trimmed.nonEmpty && ! trimmed.startsWith("#")) {
+                    // If defined, ruleTypeOpt will provide + or - for include or exclude
+                    // See [[HdfsRsyncFilterRuleType]] trait
+                    Seq((ruleTypeOpt ++ Seq(trimmed)).mkString(" "))
+                } else {
+                    Nil
+                }
+
+            })
+    )
 
     /**
      * Command line options parser
@@ -123,6 +146,11 @@ object HdfsRsyncCLI {
             .action((_, c) => c.copy(copyDirs = true))
             .text("Copy directories without recursion (default: false)")
 
+        opt[Unit]('m', "prune-empty-dirs")
+            .optional()
+            .action((_, c) => c.copy(pruneEmptyDirs = true))
+            .text("prune empty directory chains (default: false)")
+
 
 
         opt[Unit]("resolve-conflicts")
@@ -184,23 +212,52 @@ object HdfsRsyncCLI {
 
 
 
-        opt[Unit]('p', "perms")
-            .optional()
-            .action((_, c) => c.copy(preservePerms = true))
-            .text("Preserve permissions (default: false)")
-
         opt[Unit]('t', "times")
             .optional()
             .action((_, c) => c.copy(preserveTimes = true))
             .text("Preserve modification times (default: false)")
 
+
+
+        opt[Unit]('p', "perms")
+            .optional()
+            .action((_, c) => c.copy(preservePerms = true))
+            .text("Preserve permissions (default: false)")
+
         opt[Seq[String]]("chmod")
             .optional()
             .unbounded()
-            .action((x, c) => {
-                c.copy(chmodCommands = c.chmodCommands ++ x.map(_.trim))
-            })
+            .action((x, c) => c.copy(chmodCommands = c.chmodCommands ++ x.map(_.trim)))
             .text("affect file and/or directory permissions")
+
+
+
+        opt[Unit]('o', "owner")
+            .optional()
+            .action((_, c) => c.copy(preserveOwner = true))
+            .text("preserve owner (super-user only) (default: false)")
+
+        opt[Seq[String]]("usermap")
+            .optional()
+            .unbounded()
+            .action((x, c) => c.copy(usermap = c.usermap ++ x))
+            .text("custom username mapping (only applied with --owner) (default: empty)")
+
+        opt[Unit]('g', "group")
+            .optional()
+            .action((_, c) => c.copy(preserveGroup = true))
+            .text("Preserve group (default: false)")
+
+        opt[Seq[String]]("groupmap")
+            .optional()
+            .unbounded()
+            .action((x, c) => c.copy(groupmap = c.usermap ++ x))
+            .text("custom groupname mapping (only applied with --group) (default: empty)")
+
+        opt[String]("chown")
+            .optional()
+            .action((x, c) => c.copy(chown = Some(x)))
+            .text("simple username/groupname mapping (only applied with --owner/--group) (default: None)")
 
 
 
@@ -210,17 +267,35 @@ object HdfsRsyncCLI {
             .action((x, c) => c.copy(filterRules = c.filterRules :+ x.trim))
             .text("Add a filter rule")
 
+        opt[String]("filter-from-file")
+            .optional()
+            .unbounded()
+            .action((x, c) => loadFilterRulesFromFile(x, c, None))
+            .text("Add all filter rules from file")
+
         opt[String]("include")
             .optional()
             .unbounded()
-            .action((x, c) => c.copy(filterRules = c.filterRules :+ s"+ ${x.trim}"))
+            .action((x, c) => c.copy(filterRules = c.filterRules :+ Include().makeRule(x.trim)))
             .text("Add inclusion pattern (this is an alias for: --filter '+ PATTERN')")
+
+        opt[String]("include-from-file")
+            .optional()
+            .unbounded()
+            .action((x, c) => loadFilterRulesFromFile(x, c, Some(Include())))
+            .text("Add all inclusion patterns from file")
 
         opt[String]("exclude")
             .optional()
             .unbounded()
-            .action((x, c) => c.copy(filterRules = c.filterRules :+ s"- ${x.trim}"))
+            .action((x, c) => c.copy(filterRules = c.filterRules :+ Exclude().makeRule(x.trim)))
             .text("Add exclusion pattern (this is an alias for: --filter '- PATTERN')")
+
+        opt[String]("exclude-from-file")
+            .optional()
+            .unbounded()
+            .action((x, c) => loadFilterRulesFromFile(x, c, Some(Exclude())))
+            .text("Add all exclusion patterns from file")
 
 
 

@@ -21,6 +21,7 @@ import org.apache.log4j.Logger
 
 import scala.collection.immutable.ListMap
 import scala.util.Try
+import scala.util.matching.Regex
 
 
 /**
@@ -78,14 +79,15 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
      *         of the copied file otherwise.
      */
     private def copy(src: FileStatus, target: Path, isUpdate: Boolean): Either[Path, FileStatus] = {
+        val srcPath = src.getPath
         val msgHeader = if (isUpdate) "UPDATE_FILE" else "COPY_FILE"
         if (config.dryRun) {
-            log.info(s"$msgHeader [dryrun] - ${src.getPath} --> $target")
+            log.info(s"$msgHeader [dryrun] - $srcPath --> $target")
             Left(target)
         } else {
-            log.debug(s"$msgHeader - ${src.getPath} --> $target")
+            log.debug(s"$msgHeader - $srcPath --> $target")
             // booleans: deleteSource = false, overwrite = true
-            FileUtil.copy(config.srcFs, src.getPath, config.dstFs, target, false, true, config.hadoopConf)
+            FileUtil.copy(config.srcFs, srcPath, config.dstFs, target, false, true, config.hadoopConf)
             Right(config.dstFs.getFileStatus(target))
         }
     }
@@ -121,18 +123,21 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
      *               (we could still be in dryrun mode).
      */
     private def preserveModificationTime(src: FileStatus, target: Either[Path, FileStatus]): Unit = {
+        val srcPath = src.getPath
         target match {
             case Left(targetPath) =>
                 if (config.dryRun) {
-                    log.info(s"UPDATE_TIMES [dryrun] - ${src.getPath} --> $targetPath")
+                    log.info(s"UPDATE_TIMES [dryrun] - $srcPath --> $targetPath")
                 }
             case Right(targetFileStatus) =>
+                val targetPath = targetFileStatus.getPath
+                val newModifTimes = src.getModificationTime
                 if (approxCompareTimestamps(src, targetFileStatus) == 0) {
                     if (config.dryRun) {
-                        log.info(s"UPDATE_TIMES [dryrun] - ${src.getPath} --> ${target.right.get.getPath}")
+                        log.info(s"UPDATE_TIMES [dryrun] - $srcPath --> $targetPath [$newModifTimes]")
                     } else {
-                        log.debug(s"UPDATE_TIMES - ${src.getPath} --> ${target.right.get.getPath}")
-                        config.dstFs.setTimes(targetFileStatus.getPath, src.getModificationTime, -1)
+                        log.debug(s"UPDATE_TIMES - $srcPath --> $targetPath [$newModifTimes]")
+                        config.dstFs.setTimes(targetPath, newModifTimes, -1)
                     }
                 }
         }
@@ -152,12 +157,15 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
      * @param chmodParser the ChmodParser to use to update permissions (if any)
      */
     private def updatePerms(
-        src: FileStatus, target: Either[Path, FileStatus], chmodParser: Option[ChmodParser]
+        src: FileStatus,
+        target: Either[Path, FileStatus],
+        chmodParser: Option[ChmodParser]
     ): Unit = {
+        val srcPath = src.getPath
         target match {
             case Left(targetPath) =>
                 if (config.dryRun) {
-                    log.info(s"UPDATE_PERMS [dryrun] -  ${src.getPath} --> $targetPath")
+                    log.info(s"UPDATE_PERMS [dryrun] -  $srcPath --> $targetPath")
                 }
             case Right(targetFileStatus) =>
                 val baseFileStatus = if (config.preservePerms) src else targetFileStatus
@@ -169,14 +177,67 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
                     }
                 }
                 if (targetFileStatus.getPermission != newPerm) {
+                    val targetPath = targetFileStatus.getPath
                     if (config.dryRun) {
-                        log.info(s"UPDATE_PERMS [dryrun] -  ${src.getPath} --> ${target.right.get.getPath}")
+                        log.info(s"UPDATE_PERMS [dryrun] -  $srcPath --> $targetPath [$newPerm]")
                     } else {
-                        log.debug(s"UPDATE_PERMS -  ${src.getPath} --> ${target.right.get.getPath}")
-                        config.dstFs.setPermission(targetFileStatus.getPath, newPerm)
+                        log.debug(s"UPDATE_PERMS -  $srcPath --> $targetPath [$newPerm]")
+                        config.dstFs.setPermission(targetPath, newPerm)
                     }
                 }
 
+        }
+    }
+
+    /**
+     * Function updating owner/group target if needed. Use src owner/group if no mapping
+     * is found, otherwise use mapping value.
+     * @param src the src from which to get owner/group
+     * @param target the target to update in dst, as either a Left(path) in case of dryrun
+     *               (new objects are not existing in dryrun mode, so they are represented as Path
+     *               instead of FileStatus), or a Right(FileStatus) when target is available
+     *               (we could still be in dryrun mode)
+     */
+    def updateOwnerAndGroup(src: FileStatus, target: Either[Path, FileStatus]): Unit = {
+
+        def newValue(
+            preserve: Boolean,
+            srcValue: String,
+            dstValue: String,
+            mappings: Seq[(Regex, String)]
+        ): String = {
+            if (preserve) {
+                mappings
+                    .find { case (p, _) => p.findFirstIn(srcValue).isDefined }
+                    .map { case (_, v) => v }
+                    .getOrElse(srcValue)
+            } else {
+                dstValue
+            }
+        }
+
+        val srcPath = src.getPath
+        target match {
+            case Left(targetPath) =>
+                if (config.dryRun) {
+                    log.info(s"UPDATE_OWNER_GROUP [dryrun] -  $srcPath --> $targetPath")
+                }
+            case Right(targetFileStatus) =>
+                val dstOwner = targetFileStatus.getOwner
+                val dstGroup = targetFileStatus.getGroup
+
+                val newOwner = newValue(config.preserveOwner, src.getOwner, dstOwner, config.parsedUsermap)
+                val newGroup = newValue(config.preserveGroup, src.getGroup, dstGroup, config.parsedGroupmap)
+
+                if (dstOwner != newOwner || dstGroup != newGroup) {
+                    val targetPath = targetFileStatus.getPath
+                    if (config.dryRun) {
+                        log.info(s"UPDATE_OWNER_GROUP [dryrun] -  $srcPath --> $targetPath [$newOwner:$newGroup]")
+                    } else {
+                        log.debug(s"UPDATE_OWNER_GROUP -  $srcPath --> $targetPath [$newOwner:$newGroup]")
+                        config.dstFs.setOwner(targetPath, newOwner, newGroup)
+                    }
+                }
         }
     }
 
@@ -188,6 +249,10 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
         val chmodParser = if (src.isDirectory) config.chmodDirs else config.chmodFiles
         if (config.preservePerms || (isNew && chmodParser.isDefined)) {
             updatePerms(src, target, chmodParser)
+        }
+
+        if (config.preserveOwner || config.preserveGroup) {
+            updateOwnerAndGroup(src, target)
         }
     }
 
@@ -239,34 +304,37 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
         target: Path,
         existingTarget: Option[FileStatus],
         isNew: Boolean
-    ): Either[Path, FileStatus] = {
-        val skipRes = existingTarget.map(Right(_)).getOrElse(Left(target))
+    ): Option[Either[Path, FileStatus]] = {
+        // Skipping facility
+        def skip(
+            msgTag: String,
+            res: Option[Either[Path, FileStatus]] = None
+        ): Option[Either[Path, FileStatus]] = {
+            log.debug(s"SKIP_FILE [$msgTag] - ${src.getPath} --> $target")
+            res
+        }
+
         // copy new file if config says so
         if (isNew) {
             if (!config.existing) {
-                copy(src, target, isUpdate = false)
+                Some(copy(src, target, isUpdate = false))
             } else {
-                log.debug(s"SKIP_FILE [existing] - ${src.getPath} --> $target")
-                skipRes
+                skip("existing")
             }
-        }
-        // copy if src and target are different, and possibly if src newer than dst, if config says so
-        else if (areDifferent(src, existingTarget.get)) {
+        } else if (areDifferent(src, existingTarget.get)) {
             if (!config.ignoreExisting) {
                 // If config.update is true, copy only if src is newer than dst
                 if (!config.update || approxCompareTimestamps(src, existingTarget.get) < 0) {
-                    copy(src, target, isUpdate = true)
+                    Some(copy(src, target, isUpdate = true))
                 } else {
-                    log.debug(s"SKIP_FILE [update] - ${src.getPath} --> $target")
-                    skipRes
+                    skip("update")
                 }
             } else {
-                log.debug(s"SKIP_FILE [ignore-existing] - ${src.getPath} --> $target")
-                skipRes
+                skip("ignore-existing")
             }
         } else {
-            log.debug(s"SKIP_FILE - ${src.getPath} --> $target")
-            skipRes
+            // If no diff, target can be updated so shouldn't be None
+            skip("no-diff", Some(Right(existingTarget.get)))
         }
     }
 
@@ -275,6 +343,7 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
      * potential existingTarget for reference to the possibly already existing object in dst.
      * If not in recurse mode the directory is skipped, otherwise the target will be created if new,
      * overwritten if already existing as a file, or skipped if already existing as a directory.
+     * Note: existing and ignoreExisting flags only apply to files
      *
      * @param src the src FileStatus to serve as base
      * @param target the target for the possibly copied/updated files.
@@ -288,32 +357,20 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
         target: Path,
         existingTarget: Option[FileStatus],
         isNew: Boolean
-    ): Either[Path, FileStatus] = {
-        val skipRes = existingTarget.map(Right(_)).getOrElse(Left(target))
+    ): Option[Either[Path, FileStatus]] = {
         // Only update directories in recurse mode (copyDirs mode processed in copyAsNeeded)
         if (config.recurse) {
-            // Create new directory if conf says so
             if (isNew) {
-                if (!config.existing) {
-                    createDirectory(target, overwriteFile = false)
-                } else {
-                    log.debug(s"SKIP_DIR [existing] - ${src.getPath} --> $target")
-                    skipRes
-                }
-            // Overwrite exiting file if conf says so
-            } else if (existingTarget.get.isFile)
-                if (!config.ignoreExisting) {
-                    createDirectory(target, overwriteFile = true)
-                } else {
-                    log.debug(s"SKIP_DIR [ignore-existing] - ${src.getPath} --> $target")
-                    skipRes
-            } else {
+                Some(createDirectory(target, overwriteFile = false))
+            } else if (existingTarget.get.isFile) {
+                Some(createDirectory(target, overwriteFile = true))
+            } else { // Creation not needed but target to proceed
                 log.debug(s"SKIP_DIR - ${src.getPath} --> $target")
-                skipRes
+                Some(Right(existingTarget.get))
             }
         } else {
             log.debug(s"SKIP_DIR [no-recurse]- ${src.getPath} --> $target")
-            skipRes
+            None
         }
     }
 
@@ -344,11 +401,12 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
                 }
                 None
             case Some(target) =>
+                val isNew = existingTarget.isEmpty
                 // Use copy for files or if copyDirs is true
                 if (src.isFile || config.copyDirs) {
-                    Some(copyAsNeeded(src, target, existingTarget, isNew = existingTarget.isEmpty))
-                } else {
-                    Some(createAsNeeded(src, target, existingTarget, isNew = existingTarget.isEmpty))
+                    copyAsNeeded(src, target, existingTarget, isNew)
+                } else { // directory case
+                    createAsNeeded(src, target, existingTarget, isNew)
                 }
         }
     }
@@ -534,6 +592,20 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
     }
 
     /**
+     * Function deleting an existing dst path directory if it is empty
+     *
+     * @param dstOpt the optional dst directory path
+     */
+    private def pruneEmptyAsNeeded(dstOpt: Option[Path]): Unit = {
+        dstOpt.foreach(dst => {
+            if (config.pruneEmptyDirs && config.dstFs.listStatus(dst).isEmpty) {
+                log.debug(s"PRUNE_DIR - $dst")
+                config.dstFs.delete(dst, true)
+            }
+        })
+    }
+
+    /**
      * This function handles src-conflict resolution based on srcs to process and provided config.
      * It filters the srcs list accordingly to config flags and provides it to [[processSrc]].
      *
@@ -559,23 +631,22 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
         val allDirs =  srcs.forall { case (s, _) => s.isDirectory }
 
         if ((config.recurse && allDirs) || srcs.size == 1 || config.resolveConflicts) {
-            val (src, basePath) = srcs.head
+            val (src, _) = srcs.head
 
             val targetToUpdateOpt = processSrc(src, targetOpt, existingTarget)
 
             // Recursion is needed BEFORE applying metadata changes,
             // for modificationTime not being overwritten
             if (src.isDirectory && config.recurse) {
-                if (allDirs) {
-                    applyRecursive(srcs.map { case (fs, bp) => (fs.getPath, bp) }, targetOpt)
-                } else {
-                    applyRecursive(Seq((src.getPath, basePath)), targetOpt)
-                }
+                val directories = if (allDirs) srcs else Seq(srcs.head)
+                applyRecursive(directories.map { case (fs, bp) => (fs.getPath, bp) }, targetOpt)
+                pruneEmptyAsNeeded(targetOpt)
             }
 
-            targetToUpdateOpt.foreach(targetToUpdate =>
+            // Only update metadata of defined target
+            targetToUpdateOpt.foreach(targetToUpdate => {
                 updateMetadataAsNeeded(src, targetToUpdate, isNew = existingTarget.isEmpty)
-            )
+            })
 
         } else {
             throw new IllegalStateException(
