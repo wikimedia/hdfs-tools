@@ -21,7 +21,7 @@ import java.nio.file.FileSystems
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.permission.ChmodParser
 import org.apache.hadoop.fs.{FileSystem, Path}
-import org.apache.log4j._
+import org.apache.log4j.{Logger,Level,Appender,ConsoleAppender,RollingFileAppender,PatternLayout}
 
 import scala.util.Try
 import scala.util.matching.Regex
@@ -45,8 +45,8 @@ case class HdfsRsyncConfig(
 
     // Options
     dryRun: Boolean = false,
-    rootLogLevel: Level = Level.ERROR,
-    applicationLogLevel: Level = Level.INFO,
+    rootLogLevel: String = "ERROR",
+    applicationLogLevel: String = "INFO",
     logFile: Option[String] = None,
 
     recurse: Boolean = false,
@@ -97,6 +97,9 @@ case class HdfsRsyncConfig(
     logAppender: Seq[Appender] = Seq.empty
 ) {
 
+    // Accepted log levels
+    private val validLogLevels = Set("ERROR", "WARN", "INFO", "DEBUG")
+
     // These patterns are modified copies of the ones defined in hadoop chmod parser
     // https://github.com/apache/hadoop/blob/trunk/hadoop-common-project/hadoop-common/src/main/java/org/apache/hadoop/fs/permission/ChmodParser.java
     private val chmodOctalPattern = "^([FD]?)([01]?[0-7]{3})$".r
@@ -127,7 +130,7 @@ case class HdfsRsyncConfig(
      */
     private def configureLogging(): Unit = {
         val rootLogger = Logger.getRootLogger
-        rootLogger.setLevel (rootLogLevel)
+        rootLogger.setLevel(Level.toLevel(rootLogLevel))
 
         // Configure appenders on root logger
         rootLogger.removeAllAppenders ()
@@ -184,6 +187,14 @@ case class HdfsRsyncConfig(
     /********************************************************************************
      * Parameters validation functions
      */
+
+    def validateLogLevels: Option[String] = {
+        val errors =
+            (if (! validLogLevels.contains(applicationLogLevel)) Seq(s"Invalid app-log-level: $applicationLogLevel") else Nil) ++
+                (if (! validLogLevels.contains(rootLogLevel)) Seq(s"Invalid all-log-level: $rootLogLevel") else Nil)
+
+        prepareErrorMessage(errors, "Error validating log levels:")
+    }
 
     /**
      * Generic function to validate src and dst URIs.
@@ -431,6 +442,7 @@ case class HdfsRsyncConfig(
      */
     def validate: Option[String] = {
         Seq(
+            validateLogLevels,
             validateSrcsList,
             validateDst,
             validateChmods,

@@ -6,7 +6,19 @@ import java.net.URI
 
 class TestHdfsRsyncConfig extends TestHdfsRsyncHelper {
 
-    "HdfsRsyncConfig" should "validate src URI" in {
+    "HdfsRsyncConfig" should "validate log levels" in {
+        // Invalid cases
+        baseConfig.copy(applicationLogLevel = "wrong").validateLogLevels should
+            equal(Some(s"Error validating log levels:\n\t\tInvalid app-log-level: wrong"))
+        baseConfig.copy(rootLogLevel = "wrong").validateLogLevels should
+            equal(Some(s"Error validating log levels:\n\t\tInvalid all-log-level: wrong"))
+
+        // Valid cases
+        baseConfig.copy(applicationLogLevel = "ERROR").validateLogLevels should equal(None)
+        baseConfig.copy(rootLogLevel = "INFO").validateLogLevels should equal(None)
+    }
+
+    it should "validate src URI" in {
         // Invalid cases
         baseConfig.copy(allURIs = Seq(new URI("/no/scheme/uri"))).validateSrcsList should
             equal(Some("Error validating src list:\n\t\t/no/scheme/uri does not specify scheme"))

@@ -17,7 +17,7 @@ package org.wikimedia.analytics.hdfstools
 
 import org.apache.hadoop.fs.permission.{ChmodParser, FsPermission}
 import org.apache.hadoop.fs.{FileStatus, FileUtil, Path}
-import org.apache.log4j.Logger
+import org.apache.log4j.{Level, Logger}
 
 import scala.collection.immutable.ListMap
 import scala.util.Try
@@ -37,7 +37,7 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
      */
     val log: Logger = {
         val l = Logger.getLogger(this.getClass)
-        l.setLevel(config.applicationLogLevel)
+        l.setLevel(Level.toLevel(config.applicationLogLevel))
         l
     }
 

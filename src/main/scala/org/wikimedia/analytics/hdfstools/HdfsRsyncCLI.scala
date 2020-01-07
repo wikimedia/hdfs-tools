@@ -73,6 +73,11 @@ object HdfsRsyncCLI {
               |      as their content is merged, and for files content and metadata. When collision occur on files
               |      and folders, instead of keeping folders we raise an exception.
               |
+              |User and group mappings should be in the format: 'pattern:value'
+              | * pattern will be matched against src username and '*' is accepted as a wildcard and matches any
+              |   character 0 or more times
+              | * value is the new value that will be assigned if pattern matches
+              |
               |Syntax for filter/include/exclude rules is similar to the standard rsync one:
               | * One rule per command-line option.
               | * Order matters as inclusion/exclusion is done picking the first matching pattern.
@@ -109,25 +114,15 @@ object HdfsRsyncCLI {
             .action((_, c) => c.copy(dryRun = true))
             .text("Only log instead of actually taking actions (default: false)")
 
-        opt[Unit]('v', "verbose")
+        opt[String]("app-log-level")
             .optional()
-            .action((_, c) => c.copy(applicationLogLevel = Level.DEBUG))
-            .text("Add verbosity to application logging (DEBUG)")
+            .action((x, c) => c.copy(applicationLogLevel = x))
+            .text("Set application log level (default: INFO)")
 
-        opt[Unit]('q', "quiet")
+        opt[String]("all-log-level")
             .optional()
-            .action((_, c) => c.copy(applicationLogLevel = Level.WARN))
-            .text("Remove verbosity from application logging (WARN)")
-
-        opt[Unit]("all-logs-info")
-            .optional()
-            .action((_, c) => c.copy(rootLogLevel = Level.INFO))
-            .text("Set root logger level to INFO (default: ERROR)")
-
-        opt[Unit]("all-logs-debug")
-            .optional()
-            .action((_, c) => c.copy(rootLogLevel = Level.DEBUG))
-            .text("Set root logger level to DEBUG (default: ERROR)")
+            .action((x, c) => c.copy(rootLogLevel = x))
+            .text("Set root logger level (default: ERROR)")
 
         opt[String]("log-file")
             .optional()
@@ -188,7 +183,7 @@ object HdfsRsyncCLI {
             .action((_, c) => c.copy(sizeOnly = true))
             .text("Skip files that match in size (default: false)")
 
-        opt[Long]("times-diff")
+        opt[Long]("times-diff-threshold")
             .optional()
             .action((x, c) => c.copy(acceptedTimesDiffMs = x))
             .text("Milliseconds by which modificationTimes can differ and still be considered equal (default: 1000)")
@@ -251,7 +246,7 @@ object HdfsRsyncCLI {
         opt[Seq[String]]("groupmap")
             .optional()
             .unbounded()
-            .action((x, c) => c.copy(groupmap = c.usermap ++ x))
+            .action((x, c) => c.copy(groupmap = c.groupmap ++ x))
             .text("custom groupname mapping (only applied with --group) (default: empty)")
 
         opt[String]("chown")

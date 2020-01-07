@@ -164,7 +164,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
             allURIs = Seq(tmpSrc, tmpDstBase),
             recurse = true,
             sizeOnly = true,
-            applicationLogLevel = Level.DEBUG // Skipping messages are logged in debug mode
+            applicationLogLevel = "DEBUG" // Skipping messages are logged in debug mode
         ).initialize
         new HdfsRsyncExec(config).apply()
 
@@ -193,7 +193,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
             allURIs = Seq(tmpSrc, tmpDstBase),
             recurse = true,
             pruneEmptyDirs = true,
-            applicationLogLevel = Level.DEBUG // Skipping messages are logged in debug mode
+            applicationLogLevel = "DEBUG" // Skipping messages are logged in debug mode
         ).initialize
         new HdfsRsyncExec(config).apply()
 
@@ -255,7 +255,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
             recurse = true,
             preserveTimes = true,
             ignoreTimes = true,
-            applicationLogLevel = Level.DEBUG // Skipping messages are logged in debug mode
+            applicationLogLevel = "DEBUG" // Skipping messages are logged in debug mode
         ).initialize
         new HdfsRsyncExec(config).apply()
 
@@ -388,7 +388,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
             preservePerms = true,
             preserveTimes = true,
             sizeOnly = true,
-            applicationLogLevel = Level.DEBUG // Skipping messages are logged in debug mode
+            applicationLogLevel = "DEBUG" // Skipping messages are logged in debug mode
         ).initialize
         new HdfsRsyncExec(config).apply()
 
@@ -504,7 +504,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
             recurse = true,
             deleteExtraneous = true,
             filterRules = Seq("- folder_to_delete"),
-            applicationLogLevel = Level.DEBUG
+            applicationLogLevel = "DEBUG"
         ).initialize
         new HdfsRsyncExec(config).apply()
 
@@ -522,7 +522,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
             recurse = true,
             sizeOnly = true,
             filterRules = Seq("- file*"),
-            applicationLogLevel = Level.DEBUG // Skipping messages are logged in debug mode
+            applicationLogLevel = "DEBUG" // Skipping messages are logged in debug mode
         ).initialize
         new HdfsRsyncExec(config).apply()
 
@@ -557,7 +557,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
             allURIs = Seq(tmpSrc, tmpSrc2, tmpDstBase),
             recurse = true,
             sizeOnly = true,
-            applicationLogLevel = Level.DEBUG // Skipping messages are logged in debug mode
+            applicationLogLevel = "DEBUG" // Skipping messages are logged in debug mode
         ).initialize
         new HdfsRsyncExec(config).apply()
 
