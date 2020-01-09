@@ -11,6 +11,13 @@
     <version>0.0.2-SNAPSHOT</version>
     <packaging>jar</packaging>
 
+    <scm>
+        <url>scm:git:https://github.com/wikimedia/hdfs-tools</url>
+        <connection>scm:git:git@github.com:wikimedia/hdfs-tools.git</connection>
+        <developerConnection>scm:git:git@github.com:wikimedia/hdfs-tools.git</developerConnection>
+        <tag>HEAD</tag>
+    </scm>
+
     <organization>
         <name>Wikimedia Foundation</name>
         <url>http://www.wikimediafoundation.org</url>
