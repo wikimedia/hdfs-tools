@@ -16,7 +16,6 @@ package org.wikimedia.analytics.hdfstools
 
 import java.net.URI
 
-import org.apache.log4j.Level
 import scopt.OptionParser
 
 import scala.io.Source
@@ -77,6 +76,8 @@ object HdfsRsyncCLI {
               | * pattern will be matched against src username and '*' is accepted as a wildcard and matches any
               |   character 0 or more times
               | * value is the new value that will be assigned if pattern matches
+              |Note: setting user or group can only be done when the user running the job has appropriate permissions
+              |      on the destination side. The job fails otherwise.
               |
               |Syntax for filter/include/exclude rules is similar to the standard rsync one:
               | * One rule per command-line option.
@@ -124,11 +125,6 @@ object HdfsRsyncCLI {
             .action((x, c) => c.copy(rootLogLevel = x))
             .text("Set root logger level (default: ERROR)")
 
-        opt[String]("log-file")
-            .optional()
-            .action((x, c) => c.copy(logFile = Some(x)))
-            .text("File to write logs instead of sending them to stdout")
-
 
 
         opt[Unit]('r', "recursive")
@@ -174,7 +170,7 @@ object HdfsRsyncCLI {
         opt[Unit]('u', "update")
             .optional()
             .action((_, c) => c.copy(update = false))
-            .text("Skip files that are newer in dst (default: false)")
+            .text("When a file is different on src and dst, only update if it is newer in src (default: false)")
 
 
 

@@ -70,22 +70,6 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
         messages should contain(s"COPY_FILE [no-dst] - $tmpSrcFolder1File2")
     }
 
-    "HdfsRsyncExec" should "log files to be copied without dst recursively in a file" in {
-        val logFilePath = s"${testBaseURI.getPath}/test.log"
-
-        val config = baseConfig.copy(
-            allURIs = Seq(tmpSrc),
-            recurse = true,
-            logFile = Some(logFilePath)
-        ).initialize
-        new HdfsRsyncExec(config).apply()
-
-        val logFile = new File(logFilePath)
-        logFile.exists() should equal(true)
-        logFile.length() should be > 0L
-
-    }
-
     it should "log files to be copied without dst recursively with trailing slash" in {
         val config = baseConfig.copy(
             allURIs = Seq(new URI(s"$tmpSrc/")),

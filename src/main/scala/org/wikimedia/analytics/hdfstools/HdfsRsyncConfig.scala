@@ -21,7 +21,7 @@ import java.nio.file.FileSystems
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.permission.ChmodParser
 import org.apache.hadoop.fs.{FileSystem, Path}
-import org.apache.log4j.{Logger,Level,Appender,ConsoleAppender,RollingFileAppender,PatternLayout}
+import org.apache.log4j.{Logger,Level,Appender,ConsoleAppender,PatternLayout}
 
 import scala.util.Try
 import scala.util.matching.Regex
@@ -47,7 +47,6 @@ case class HdfsRsyncConfig(
     dryRun: Boolean = false,
     rootLogLevel: String = "ERROR",
     applicationLogLevel: String = "INFO",
-    logFile: Option[String] = None,
 
     recurse: Boolean = false,
     copyDirs: Boolean = false,
@@ -135,8 +134,7 @@ case class HdfsRsyncConfig(
         // Configure appenders on root logger
         rootLogger.removeAllAppenders ()
         val consoleLogAppender = if (logAppender.isEmpty) Some(new ConsoleAppender(loggingPattern, ConsoleAppender.SYSTEM_OUT)) else None
-        val logFileAppender = logFile.map(new RollingFileAppender(loggingPattern, _))
-        (logAppender ++ consoleLogAppender ++ logFileAppender).foreach (appender => rootLogger.addAppender (appender) )
+        (logAppender ++ consoleLogAppender).foreach (appender => rootLogger.addAppender (appender) )
     }
 
     /**
