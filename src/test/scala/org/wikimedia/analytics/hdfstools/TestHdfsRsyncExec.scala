@@ -165,7 +165,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
         innerList3 should contain("file_2")
 
         val messages = testLogAppender.logEvents.map(_.getMessage.toString)
-        messages.count(_.startsWith("SKIP_FILE")) should equal(1)
+        messages.count(_.startsWith("SAME_FILE")) should equal(1)
     }
 
     it should "copy src to dst recursively and prune empty dirs" in {
@@ -389,7 +389,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
         new HdfsRsyncExec(config).apply()
 
         val messages = testLogAppender.logEvents.map(_.getMessage.toString)
-        val skippingMessages = messages.filter(m => m.startsWith("SKIP_") && m.contains("test_folder/file_1"))
+        val skippingMessages = messages.filter(m => m.startsWith("SAME_FILE") && m.contains("test_folder/file_1"))
         skippingMessages.size should equal(1)
 
         val resPath2 = Paths.get(tmpDstFile1)
@@ -564,7 +564,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
         innerList2 should contain("file_4")
 
         val messages = testLogAppender.logEvents.map(_.getMessage.toString)
-        messages.count(_.startsWith("SKIP_FILE")) should equal(2)
+        messages.count(_.startsWith("SAME_FILE")) should equal(2)
     }
 
     it should "fail to copy src and src2 in case of directory-conflict in dir mode" in {

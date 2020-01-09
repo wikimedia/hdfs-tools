@@ -290,7 +290,11 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
      * Function processing a single src file, with its associated target in dst, and its
      * potential existingTarget for reference to the possibly already existing object in dst.
      * The target file will be copied if new, updated if already existing and different,
-     * or skipped if already existing and not different (configuration dependent).
+     * or omitted if already existing and not different (configuration dependent).
+     *
+     * The returned value will be applied metadata changes (modification-times, permissions
+     * and ownership). Some is returned when the file is copied or omitted because no
+     * change is needed, None when the file skipped  because of configuration settings.
      *
      * @param src the src FileStatus to serve as base
      * @param target the target for the possibly copied/updated files.
@@ -306,12 +310,9 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
         isNew: Boolean
     ): Option[Either[Path, FileStatus]] = {
         // Skipping facility
-        def skip(
-            msgTag: String,
-            res: Option[Either[Path, FileStatus]] = None
-        ): Option[Either[Path, FileStatus]] = {
+        def skip(msgTag: String): Option[Either[Path, FileStatus]] = {
             log.debug(s"SKIP_FILE [$msgTag] - ${src.getPath} --> $target")
-            res
+            None
         }
 
         // copy new file if config says so
@@ -334,7 +335,8 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
             }
         } else {
             // If no diff, target can be updated so shouldn't be None
-            skip("no-diff", Some(Right(existingTarget.get)))
+            log.debug(s"SAME_FILE - ${src.getPath} --> $target")
+            Some(Right(existingTarget.get))
         }
     }
 
