@@ -23,9 +23,13 @@ import org.apache.hadoop.fs.{FileStatus, Path}
 /**
  * Enum to represent if a rule is an exclusion or inclusion rule
  */
-sealed trait RuleType
-case class Include() extends RuleType
-case class Exclude() extends RuleType
+sealed trait HdfsRsyncFilterRuleType {
+    val header: String
+    def makeRule(pattern: String) = s"$header $pattern"
+    override def toString: String = header
+}
+case class Include(header: String  = "+") extends HdfsRsyncFilterRuleType
+case class Exclude(header: String = "-") extends HdfsRsyncFilterRuleType
 
 /**
  * Class defining a FilterRule that can be applied to match a FileStatus
@@ -40,7 +44,7 @@ case class Exclude() extends RuleType
  * @param directoryOnly to match directories only
  */
 class HdfsRsyncFilterRule(
-    val ruleType: RuleType,
+    val ruleType: HdfsRsyncFilterRuleType,
     pattern: PathMatcher,
     oppositeMatch: Boolean,
     fullPathCheck: Boolean,

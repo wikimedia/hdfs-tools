@@ -1,0 +1,8 @@
++ this is
+- a test file
++ for rules
+
+ - with
+# comments and
+
+     + spaced empty lines
