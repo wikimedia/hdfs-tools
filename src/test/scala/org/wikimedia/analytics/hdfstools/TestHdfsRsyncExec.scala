@@ -371,7 +371,6 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
             recurse = true,
             preservePerms = true,
             preserveTimes = true,
-            sizeOnly = true,
             applicationLogLevel = "DEBUG" // Skipping messages are logged in debug mode
         ).initialize
         new HdfsRsyncExec(config).apply()
@@ -403,7 +402,6 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
             allURIs = Seq(tmpSrc, tmpDstBase),
             recurse = true,
             preserveTimes = true,
-            sizeOnly = true,
             chmodCommands = Seq("F600", "D750")
         ).initialize
         new HdfsRsyncExec(config).apply()
@@ -504,7 +502,6 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
         val config = baseConfig.copy(
             allURIs = Seq(tmpSrc, tmpDstBase),
             recurse = true,
-            sizeOnly = true,
             filterRules = Seq("- file*"),
             applicationLogLevel = "DEBUG" // Skipping messages are logged in debug mode
         ).initialize

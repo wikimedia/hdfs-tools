@@ -16,7 +16,6 @@ package org.wikimedia.analytics.hdfstools
 
 import java.io.IOException
 import java.net.URI
-import java.nio.file.FileSystems
 
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.fs.permission.ChmodParser
@@ -548,7 +547,7 @@ case class HdfsRsyncConfig(
                         s"glob:$rawPattern"
                     }
                 }
-                val pattern = FileSystems.getDefault.getPathMatcher(updatedPattern)
+                val pattern = java.nio.file.FileSystems.getDefault.getPathMatcher(updatedPattern)
 
                 new HdfsRsyncFilterRule(
                     ruleType = if (rawType == "+") Include() else Exclude(),
