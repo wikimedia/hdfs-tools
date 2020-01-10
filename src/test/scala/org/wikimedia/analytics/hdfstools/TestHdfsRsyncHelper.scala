@@ -5,7 +5,7 @@ import java.net.URI
 
 import org.apache.commons.io.FileUtils
 import org.apache.log4j.spi.LoggingEvent
-import org.apache.log4j.{AppenderSkeleton, ConsoleAppender}
+import org.apache.log4j.{AppenderSkeleton}
 import org.scalatest.BeforeAndAfterEach
 import org.scalatest.flatspec.AnyFlatSpec
 import org.scalatest.matchers.should.Matchers
@@ -28,7 +28,8 @@ trait TestHdfsRsyncHelper extends AnyFlatSpec with Matchers with BeforeAndAfterE
         def reset(): Unit = logEvents.clear()
     }
 
-    val originalConfig = new HdfsRsyncConfig()
+    // Set acceptedTimesDiffMs to 0 as using the same filesystem means using the same precision
+    val originalConfig = new HdfsRsyncConfig(acceptedTimesDiffMs = 0L)
     val testLogAppender: TestLogAppender = new TestLogAppender()
     val baseConfig: HdfsRsyncConfig = originalConfig.copy(logAppender = Seq(testLogAppender))
 
@@ -61,6 +62,12 @@ trait TestHdfsRsyncHelper extends AnyFlatSpec with Matchers with BeforeAndAfterE
     val tmpDstFolder2 = new URI(s"$tmpDst/folder_2")
     val tmpDstFolder2File4 = new URI(s"$tmpDstFolder2/file_4")
 
+    private def create(uri: URI, modificationTimeOffset: Long, isDir: Boolean): Unit = {
+        val f = new File(uri)
+        if (isDir) f.mkdirs() else f.createNewFile()
+        f.setLastModified(System.currentTimeMillis() - modificationTimeOffset)
+    }
+
     /**
      *
      * Creates source and destination test folders:
@@ -80,19 +87,19 @@ trait TestHdfsRsyncHelper extends AnyFlatSpec with Matchers with BeforeAndAfterE
      *   | file_4
      */
     def createTestFiles(): Unit = {
-        new File(tmpDstBase).mkdirs()
-        new File(tmpSrcBase).mkdirs()
-        new File(tmpSrc2Base).mkdirs()
+        create(tmpDstBase, 0L, isDir = true)
+        create(tmpSrcBase, 10000L, isDir = true)
+        create(tmpSrc2Base, 20000L, isDir = true)
 
-        new File(tmpSrc).mkdir()
-        new File(tmpSrcFile1).createNewFile()
-        new File(tmpSrcFolder1).mkdir()
-        new File(tmpSrcFolder1File2).createNewFile()
+        create(tmpSrc, 10000L, isDir = true)
+        create(tmpSrcFile1, 9000L, isDir = false)
+        create(tmpSrcFolder1, 8000L, isDir = true)
+        create(tmpSrcFolder1File2, 7000L, isDir = false)
 
-        new File(tmpSrc2).mkdir()
-        new File(tmpSrc2File3).createNewFile()
-        new File(tmpSrc2Folder2).mkdir()
-        new File(tmpSrc2Folder2File4).createNewFile()
+        create(tmpSrc2, 20000L, isDir = true)
+        create(tmpSrc2File3, 19000L, isDir = false)
+        create(tmpSrc2Folder2, 18000L, isDir = true)
+        create(tmpSrc2Folder2File4, 17000L, isDir = false)
     }
 
     def deleteTestFiles(): Unit = {

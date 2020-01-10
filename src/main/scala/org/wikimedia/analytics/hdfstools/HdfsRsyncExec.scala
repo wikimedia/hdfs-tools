@@ -132,7 +132,7 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
             case Right(targetFileStatus) =>
                 val targetPath = targetFileStatus.getPath
                 val newModifTimes = src.getModificationTime
-                if (approxCompareTimestamps(src, targetFileStatus) == 0) {
+                if (approxCompareTimestamps(src, targetFileStatus) != 0) {
                     if (config.dryRun) {
                         log.info(s"UPDATE_TIMES [dryrun] - $srcPath --> $targetPath [$newModifTimes]")
                     } else {
@@ -283,7 +283,7 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
         config.ignoreTimes ||                                      // Force copy/update OR
             src.getLen != existingTarget.getLen ||                 // Size is different OR
             (!config.sizeOnly &&                                   // (Use modificationTimes AND
-                approxCompareTimestamps(src, existingTarget) == 0) // modificationTimes are different)
+                approxCompareTimestamps(src, existingTarget) != 0) // modificationTimes are different)
     }
 
     /**
