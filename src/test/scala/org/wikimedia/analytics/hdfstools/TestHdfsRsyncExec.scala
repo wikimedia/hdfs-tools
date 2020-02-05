@@ -168,7 +168,25 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
         messages.count(_.startsWith("SAME_FILE")) should equal(1)
     }
 
-    it should "copy src to dst recursively and prune empty dirs" in {
+    it should "copy src to dst recursively and prune empty dirs in dry-run mode" in {
+        // Delete file in folder_1 for it to be pruned
+        new File(tmpSrcFolder1File2).delete()
+        new File(tmpSrcFolder1File2).exists() should equal(false)
+
+        val config = baseConfig.copy(
+            allURIs = Seq(tmpSrc, tmpDstBase),
+            dryRun = true,
+            recurse = true,
+            pruneEmptyDirs = true,
+            applicationLogLevel = "DEBUG" // Skipping messages are logged in debug mode
+        ).initialize
+        new HdfsRsyncExec(config).apply()
+
+        val messages = testLogAppender.logEvents.map(_.getMessage.toString)
+        messages.count(_.startsWith("PRUNE_DIR")) should equal(2)
+    }
+
+    it should "copy src to dst recursively with chmod and prune empty dirs" in {
         // Delete file in folder_1 for it to be pruned
         new File(tmpSrcFolder1File2).delete()
         new File(tmpSrcFolder1File2).exists() should equal(false)
@@ -176,6 +194,7 @@ class TestHdfsRsyncExec extends TestHdfsRsyncHelper {
         val config = baseConfig.copy(
             allURIs = Seq(tmpSrc, tmpDstBase),
             recurse = true,
+            chmodCommands = Seq("D700"),
             pruneEmptyDirs = true,
             applicationLogLevel = "DEBUG" // Skipping messages are logged in debug mode
         ).initialize

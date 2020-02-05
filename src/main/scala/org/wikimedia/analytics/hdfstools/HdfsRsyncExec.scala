@@ -127,7 +127,7 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
         target match {
             case Left(targetPath) =>
                 if (config.dryRun) {
-                    log.info(s"UPDATE_TIMES [dryrun] - $srcPath --> $targetPath")
+                    log.info(s"UPDATE_TIMES_IF_NEEDED [dryrun] - $srcPath --> $targetPath")
                 }
             case Right(targetFileStatus) =>
                 val targetPath = targetFileStatus.getPath
@@ -165,7 +165,7 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
         target match {
             case Left(targetPath) =>
                 if (config.dryRun) {
-                    log.info(s"UPDATE_PERMS [dryrun] -  $srcPath --> $targetPath")
+                    log.info(s"UPDATE_PERMS_IF_NEEDED [dryrun] -  $srcPath --> $targetPath")
                 }
             case Right(targetFileStatus) =>
                 val baseFileStatus = if (config.preservePerms) src else targetFileStatus
@@ -220,7 +220,7 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
         target match {
             case Left(targetPath) =>
                 if (config.dryRun) {
-                    log.info(s"UPDATE_OWNER_GROUP [dryrun] -  $srcPath --> $targetPath")
+                    log.info(s"UPDATE_OWNER_GROUP_IF_NEEDED [dryrun] -  $srcPath --> $targetPath")
                 }
             case Right(targetFileStatus) =>
                 val dstOwner = targetFileStatus.getOwner
@@ -594,17 +594,26 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
     }
 
     /**
-     * Function deleting an existing dst path directory if it is empty
+     * Function deleting an existing dst path directory if it is empty.
+     * Note: This method is coded in imperative style to facilitate readability
      *
      * @param dstOpt the optional dst directory path
+     * @return true if the folder has been deleted for real, false if no deletion or dry-run mode
      */
-    private def pruneEmptyAsNeeded(dstOpt: Option[Path]): Unit = {
+    private def pruneEmptyAsNeeded(dstOpt: Option[Path]): Boolean = {
+        var pruned: Boolean = false
         dstOpt.foreach(dst => {
-            if (config.pruneEmptyDirs && config.dstFs.listStatus(dst).isEmpty) {
-                log.debug(s"PRUNE_DIR - $dst")
-                config.dstFs.delete(dst, true)
+            if (config.pruneEmptyDirs) {
+                if (config.dryRun) {
+                    log.info(s"PRUNE_DIR_IF_EMPTY [dryrun]- $dst")
+                } else if (config.dstFs.listStatus(dst).isEmpty) {
+                    log.debug(s"PRUNE_DIR - $dst")
+                    config.dstFs.delete(dst, true)
+                    pruned = true
+                }
             }
         })
+        pruned
     }
 
     /**
@@ -642,13 +651,17 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
             if (src.isDirectory && config.recurse) {
                 val directories = if (allDirs) srcs else Seq(srcs.head)
                 applyRecursive(directories.map { case (fs, bp) => (fs.getPath, bp) }, targetOpt)
-                pruneEmptyAsNeeded(targetOpt)
             }
 
-            // Only update metadata of defined target
-            targetToUpdateOpt.foreach(targetToUpdate => {
-                updateMetadataAsNeeded(src, targetToUpdate, isNew = existingTarget.isEmpty)
-            })
+            // if directory, prune if needed
+            val pruned = src.isDirectory && pruneEmptyAsNeeded(targetOpt)
+
+            // If target not pruned, Only update metadata of defined target
+            if (!pruned) {
+                targetToUpdateOpt.foreach(targetToUpdate => {
+                    updateMetadataAsNeeded(src, targetToUpdate, isNew = existingTarget.isEmpty)
+                })
+            }
 
         } else {
             throw new IllegalStateException(
