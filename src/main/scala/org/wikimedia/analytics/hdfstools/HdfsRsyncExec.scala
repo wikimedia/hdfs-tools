@@ -325,7 +325,7 @@ class HdfsRsyncExec(config: HdfsRsyncConfig) {
         } else if (areDifferent(src, existingTarget.get)) {
             if (!config.ignoreExisting) {
                 // If config.update is true, copy only if src is newer than dst
-                if (!config.update || approxCompareTimestamps(src, existingTarget.get) < 0) {
+                if (!config.update || approxCompareTimestamps(src, existingTarget.get) > 0) {
                     Some(copy(src, target, isUpdate = true))
                 } else {
                     skip("update")
