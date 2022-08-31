@@ -100,10 +100,16 @@ trait TestHdfsRsyncHelper extends AnyFlatSpec with Matchers with BeforeAndAfterE
         create(tmpSrc2File3, 19000L, isDir = false)
         create(tmpSrc2Folder2, 18000L, isDir = true)
         create(tmpSrc2Folder2File4, 17000L, isDir = false)
+        // Force some wait time between interactions with the filesystem.
+        // This prevents files accessed-time issues that make tests fail
+        Thread.sleep(10)
     }
 
     def deleteTestFiles(): Unit = {
         FileUtils.deleteDirectory(new File(testBaseURI))
+        // Force some wait time between interactions with the filesystem.
+        // This prevents files accessed-time issues that make tests fail
+        Thread.sleep(10)
     }
 
     override def beforeEach(): Unit = {
