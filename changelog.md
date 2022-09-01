@@ -1,3 +1,8 @@
+# 0.0.6
+ * Add HDFSArchiver, a hdfs tool
+ * Fix hdfs-rsync tests errors
+ * Fix bug in 'destination file update' mode
+
 # 0.0.5
  * Update changelog historically
 
